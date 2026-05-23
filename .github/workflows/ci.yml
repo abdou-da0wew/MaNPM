@@ -1,0 +1,86 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-and-test:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        go: ['1.26']
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go }}
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test
+        run: go test ./... -v -count=1
+
+      - name: Build
+        run: go build -ldflags="-s -w" -o manpm${{ runner.os == 'Windows' && '.exe' || '' }} ./cmd/manpm/
+
+      - name: Check binary
+        run: |
+          if [ "${{ runner.os }}" != "Windows" ]; then
+            file ./manpm
+            ls -lh ./manpm
+          fi
+        shell: bash
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+      - uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
+          args: --timeout=5m
+
+  tag-release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [build-and-test, lint]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+
+      - name: Build all platforms
+        run: |
+          for os in linux darwin windows; do
+            for arch in amd64 arm64; do
+              ext=""
+              [ "$os" = "windows" ] && ext=".exe"
+              GOOS=$os GOARCH=$arch go build -ldflags="-s -w" -o "manpm-${os}-${arch}${ext}" ./cmd/manpm/
+            done
+          done
+
+      - name: Upload release artifacts
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            manpm-linux-amd64
+            manpm-linux-arm64
+            manpm-darwin-amd64
+            manpm-darwin-arm64
+            manpm-windows-amd64.exe
+          generate_release_notes: true

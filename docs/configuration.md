@@ -1,8 +1,8 @@
 # Configuration
 
-MaNPM reads a `manpm.config.toml` file from the project root. If the file does not exist, sensible defaults are used.
+MaNPM reads settings from `manpm.config.toml` in the project root. If the file does not exist, defaults are used.
 
-## File Location
+## File location
 
 ```
 <project-root>/manpm.config.toml
@@ -12,86 +12,86 @@ MaNPM reads a `manpm.config.toml` file from the project root. If the file does n
 
 ### [core]
 
-Controls parallelism and retry behavior.
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `parallel_limit` | int | 8 | Maximum number of concurrent package extractions |
-| `auto_fix_peers` | bool | true | Automatically resolve peer dependency mismatches |
-| `retry_count` | int | 3 | Number of retry attempts for failed downloads |
+Control parallelism and retry behavior.
 
 ```toml
 [core]
-parallel_limit = 16
-auto_fix_peers = false
-retry_count = 5
+parallel_limit = 8
+auto_fix_peers = true
+retry_count = 3
 ```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `parallel_limit` | int | 8 | Maximum concurrent package extractions |
+| `auto_fix_peers` | bool | true | Auto-resolve peer dependency mismatches |
+| `retry_count` | int | 3 | Retry attempts for failed downloads |
 
 ### [behavior]
 
-Runtime safety and maintenance behavior.
+Runtime safety and maintenance.
+
+```toml
+[behavior]
+safe_mode = false
+auto_prune = false
+confirm_destructive = true
+```
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `safe_mode` | bool | false | Skip risky operations (exec scripts, rebuilds) |
-| `auto_prune` | bool | false | Automatically remove unused packages after install |
+| `auto_prune` | bool | false | Auto-remove unused packages after install |
 | `confirm_destructive` | bool | true | Prompt before destructive operations |
-
-```toml
-[behavior]
-safe_mode = true
-auto_prune = true
-confirm_destructive = false
-```
 
 ### [install_policy]
 
-How packages are resolved and installed.
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `prefer_lockfile` | bool | true | Use lockfile resolutions over package.json ranges |
-| `version_strategy` | string | `stable` | Version selection: `stable`, `testing`, `nightly`, `locked` |
-| `ignore_scripts` | bool | false | Skip lifecycle scripts (install, postinstall) |
-| `skip_binlink` | bool | false | Skip `.bin` symlink creation |
+Package resolution and installation.
 
 ```toml
 [install_policy]
-prefer_lockfile = false
-version_strategy = "locked"
-ignore_scripts = true
-skip_binlink = true
+prefer_lockfile = true
+version_strategy = "stable"
+ignore_scripts = false
+skip_binlink = false
 ```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `prefer_lockfile` | bool | true | Use lockfile over package.json ranges |
+| `version_strategy` | string | `stable` | `stable`, `testing`, `nightly`, `locked` |
+| `ignore_scripts` | bool | false | Skip lifecycle scripts |
+| `skip_binlink` | bool | false | Skip `.bin` symlink creation |
 
 ### [ui]
 
-Display mode for terminal output.
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `mode` | string | `developer` | Output verbosity: `minimal`, `developer`, `psychotic` |
+Terminal output verbosity.
 
 ```toml
 [ui]
-mode = "minimal"
+mode = "developer"
 ```
-
-### [profile]
-
-Select an active profile. Profiles can override any of the above settings.
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `active` | string | `""` | Name of the profile to apply |
+| `mode` | string | `developer` | `minimal`, `developer`, or `psychotic` |
+
+### [profile]
+
+Select an active profile.
 
 ```toml
 [profile]
 active = "strict"
 ```
 
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `active` | string | `""` | Name of the profile to activate |
+
 ### [profile.<name>]
 
-Define a named profile that overrides base settings when activated. Profiles can set UI mode, strictness, version strategy, and safe mode.
+Define a named profile that overrides base settings.
 
 ```toml
 [profile.strict]
@@ -101,13 +101,19 @@ version_strategy = "stable"
 
 [profile.fast]
 ui = "minimal"
-version_strategy = "testing"
 safe_mode = false
 ```
 
+| Field | Type | Description |
+|-------|------|-------------|
+| `ui` | string | Override UI mode |
+| `safe_mode` | bool | Override safe mode |
+| `strictness` | string | `safe` enables safe mode |
+| `version_strategy` | string | Override version strategy |
+
 ### [override.<project>]
 
-Per-project overrides for install policy. The `<project>` name is matched against the package name from `package.json`.
+Per-project install policy overrides. The project name is matched against the `name` field in `package.json`.
 
 ```toml
 [override.critical-app]
@@ -117,7 +123,7 @@ ignore_scripts = true
 skip_binlink = true
 ```
 
-## Complete Example
+## Complete example
 
 ```toml
 [core]
@@ -152,9 +158,9 @@ prefer_lockfile = true
 version_strategy = "locked"
 ```
 
-## Defaults
+## Default values
 
-If no config file exists, these values are used:
+If no config file is present, these values apply:
 
 | Field | Default |
 |-------|---------|

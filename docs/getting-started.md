@@ -2,53 +2,102 @@
 
 ## Prerequisites
 
-- Go 1.26+
-- Node.js 18+ and npm 9+ (for native rebuild fallback)
-- Git (for cloning)
+- Go 1.26+ (to build from source)
+- Node.js 18+ and npm 9+ (runtime requirement for native rebuild fallback)
+- Git
 
-## Build
+## Installation
 
-The Go toolchain cannot RLock files on fuseblk filesystems. Build from `/tmp`:
+### Using go install
 
-```bash
-cp -a /storagesdcard/ManPM/* /tmp/manpm-src/
-cd /tmp/manpm-src
-go build -ldflags="-s -w" -o /tmp/manpm ./cmd/manpm/
+```
+go install github.com/abdou-da0wew/MaNPM/cmd/manpm@latest
 ```
 
-The binary is approximately 2.4 MB (stripped) and has zero external dependencies.
+The binary is placed at `$GOPATH/bin/manpm` (or `$HOME/go/bin/manpm`). Ensure that directory is in your `$PATH`.
 
-## First Run
+### Build from source
 
-```bash
-cd /tmp/manpm-src
-/tmp/manpm
+```
+git clone https://github.com/abdou-da0wew/MaNPM.git
+cd MaNPM
+go build -ldflags="-s -w" -o manpm ./cmd/manpm/
 ```
 
-This shows the help screen with all 12 available commands.
+This produces a statically linked binary at `./manpm` (~2.4 MB stripped).
 
-```bash
-/tmp/manpm install
+### Verify
+
+```
+manpm --help
 ```
 
-This runs a simulated install displaying the configuration that would be used. In production, this reads `package-lock.json`, resolves the dependency graph, downloads and extracts tarballs in parallel, verifies SHA512 checksums, runs native rebuilds, and links `.bin` executables.
+You should see the help screen listing all 12 commands.
 
-```bash
-/tmp/manpm doctor
+## Your first run
+
+### 1. Create or navigate to a Node.js project
+
+```
+cd my-node-project
 ```
 
-Scans the project directory for `package.json`, `package-lock.json`, verifies `node` and `npm` are in PATH, checks filesystem permissions, and reports a health score out of 100.
+### 2. Ensure a lockfile exists
 
-## Sync Back
+MaNPM reads `package-lock.json` (v2 or v3). If you do not have one, run `npm install` first to generate it.
 
-After building or modifying code, sync back to the source directory:
+### 3. Scan your project
 
-```bash
-cp -a /tmp/manpm-src/* /storagesdcard/ManPM/
+```
+manpm doctor
 ```
 
-## Next Steps
+This checks for `package.json`, reads `package-lock.json`, verifies `node` and `npm` are in PATH, checks filesystem permissions, and reports a health score out of 100.
 
-- [Commands reference](commands.md) for all subcommands and flags
-- [Configuration guide](configuration.md) for `manpm.config.toml`
-- [Architecture overview](architecture.md) for package structure and data flow
+### 4. Install dependencies
+
+```
+manpm install
+```
+
+This parses the lockfile, builds a dependency DAG, downloads and extracts tarballs in parallel with SHA512 verification, runs native module rebuilds if needed, and links `.bin` executables.
+
+For a dry run that shows what would happen without making changes:
+
+```
+manpm install --dry-run
+```
+
+### 5. Explore your project
+
+```
+manpm audit          # Check for known vulnerabilities
+manpm map            # Show the dependency graph as a tree
+manpm entropy        # Measure project chaos metrics
+manpm sensei         # Full project review
+```
+
+## Configuration
+
+Create a `manpm.config.toml` file in your project root to customize behavior. See [Configuration](configuration.md) for all available options.
+
+Example:
+
+```toml
+[core]
+parallel_limit = 8
+auto_fix_peers = true
+
+[install_policy]
+prefer_lockfile = true
+version_strategy = "stable"
+
+[ui]
+mode = "developer"
+```
+
+## Next steps
+
+- [Guide](guide.md) for detailed walkthroughs
+- [Commands](commands.md) for every subcommand and flag
+- [Configuration](configuration.md) for all config fields

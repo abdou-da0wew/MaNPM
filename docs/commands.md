@@ -8,11 +8,18 @@ manpm <command> [options]
 
 If no command is given, `install` runs by default.
 
-## Commands
+## Global flags
+
+| Flag | Description |
+|------|-------------|
+| `--help`, `-h` | Show help |
+| `--version`, `-V` | Show version |
+
+## Command reference
 
 ### install
 
-Install all dependencies. This is the primary command.
+Install all dependencies from the lockfile.
 
 ```
 manpm install [options]
@@ -20,19 +27,19 @@ manpm install [options]
 
 | Flag | Short | Type | Default | Description |
 |------|-------|------|---------|-------------|
-| `--threads` | `-t` | int | 0 (auto) | Number of parallel workers |
+| `--threads` | `-t` | int | 0 (auto) | Number of parallel workers. 0 uses platform-optimal count |
 | `--lane-mode` | `-m` | string | `parallel` | Execution mode: `parallel` or `sequential` |
-| `--priority-lock` | `-p` | bool | false | Prioritize lockfile parsing over package.json |
+| `--priority-lock` | `-p` | bool | false | Prioritize lockfile over package.json |
 | `--dry-run` | | bool | false | Simulate without downloading or extracting |
 | `--skip-rebuild` | | bool | false | Skip native module rebuild step |
 | `--skip-binlink` | | bool | false | Skip `.bin` executable linking |
 | `--skip-scripts` | | bool | false | Skip lifecycle script execution |
-| `--force-rebuild` | | bool | false | Force native rebuild even if cached |
-| `--retries` | `-r` | int | 3 | Maximum retries per failed package download |
+| `--force-rebuild` | | bool | false | Force rebuild even if cached |
+| `--retries` | `-r` | int | 3 | Maximum retries per package download |
 
 Examples:
 
-```bash
+```
 manpm install
 manpm install --threads 8 --dry-run
 manpm install --skip-rebuild --skip-scripts
@@ -43,7 +50,7 @@ manpm install --threads 4 --retries 5 --priority-lock
 
 ### add
 
-Add a package and preview its impact.
+Add a package and show impact preview.
 
 ```
 manpm add <package> [options]
@@ -51,16 +58,16 @@ manpm add <package> [options]
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
-| `--smart` | bool | false | Enable smart resolution |
-| `--why` | bool | false | Show why this package would be needed |
+| `--smart` | bool | false | Enable smart dependency resolution |
+| `--why` | bool | false | Show why the package would be needed |
 | `--dry-run` | string | `""` | Simulate add. Use `=deep` for deep analysis |
 | `--peer-fix` | bool | false | Auto-fix peer dependency conflicts |
 | `--dev` | bool | false | Install as a dev dependency |
-| `--exact` | bool | false | Save exact version (no ^ or ~) |
+| `--exact` | bool | false | Save exact version (no range prefix) |
 
 Examples:
 
-```bash
+```
 manpm add express
 manpm add lodash --dev --exact
 manpm add react --why
@@ -77,67 +84,83 @@ Show detailed information about an installed package.
 manpm explain <package>
 ```
 
-Reads the package's `package.json` from `node_modules/<package>/` and displays name, version, description, homepage, license, dependencies, dev dependencies, install script status, and native addon detection.
+Reads the package's `package.json` from `node_modules/<package>/` and displays name, version, description, homepage, license, dependencies, install script status, and native addon detection.
 
 Examples:
 
-```bash
+```
 manpm explain lodash
 manpm explain express
+```
+
+Output:
+
+```
+Package: lodash
+Version: 4.17.21
+License: MIT
+Dependencies: (none)
+Install scripts: false
+Native addon: false
 ```
 
 ---
 
 ### audit
 
-Run vulnerability analysis against the lockfile.
+Scan the lockfile for known vulnerabilities.
 
 ```
 manpm audit
 ```
 
-Reads `package-lock.json`, cross-references against a built-in advisory database for known vulnerabilities (lodash, minimist, node-fetch, follow-redirects, glob-parent), and reports severity, CVE, title, and fix version for each match.
+Reads `package-lock.json` and checks against a built-in advisory database. Reports severity, CVE, title, and available fix version for each match. Packages already at the fixed version are skipped.
 
 Example output:
 
 ```
-Package: lodash  Severity: medium  Title: Prototype Pollution in lodash
-CVE: CVE-2020-8203  Fix: 4.17.21
+lodash [medium] Prototype Pollution in lodash (CVE: CVE-2020-8203)
+  Fix available: 4.17.21
 ```
 
 ---
 
 ### doctor
 
-Analyze project health and get a numeric score.
+Analyze project health and produce a score.
 
 ```
 manpm doctor
 ```
 
-Checks: existence of `node_modules`, dependency graph cycles, graph size, empty directories. Each issue deducts from a base score of 100 (errors -25, warnings -10, suggestions -3).
+Checks:
 
-Example output:
+- `node_modules` existence and content
+- Dependency graph for cycles
+- Graph size (warns above 500 packages)
+- Empty directories
 
-```
-Score: 65.0%
-node_modules directory does not exist
-Fix: Run npm install
-```
+Each issue type deducts from a base score of 100:
+
+| Severity | Deduction | Examples |
+|----------|-----------|---------|
+| error | -25 | Missing node_modules, graph cycle |
+| warning | -10 | Empty graph, empty node_modules |
+| suggestion | -3 | Large dependency tree |
 
 ---
 
 ### map
 
-Show the dependency graph as an ASCII tree.
+Render the dependency graph as an ASCII tree.
 
 ```
 manpm map
 ```
 
-Uses the topological sort levels to render a tree showing each package at its dependency level with its version and immediate dependencies.
+Groups packages by topological level. Each level is rendered with its packages and their immediate dependencies.
 
-Example:
+Example output:
 
 ```
 Dependency Map
@@ -161,11 +184,11 @@ Measure project chaos metrics.
 manpm entropy
 ```
 
-| Metric | Description |
-|--------|-------------|
-| Score | 0-100 chaos score combining duplicate ratio, depth, and cycles |
-| Total packages | Number of packages in the dependency graph |
-| Unique libraries | Number of unique package names |
+| Field | Description |
+|-------|-------------|
+| Score | 0-100 chaos score combining duplicate ratio, depth, cycles |
+| Total packages | Count of all packages in the graph |
+| Unique libraries | Count of unique package names |
 | Avg depth | Weighted average dependency depth |
 | Circular deps | Number of detected circular dependencies |
 | Redundant groups | Packages installed at multiple different versions |
@@ -189,11 +212,15 @@ manpm prune [options]
 
 ### sandbox
 
-Show isolation information for a package.
+Display sandbox information for a package.
 
 ```
 manpm sandbox <package>
+```
 
+Output:
+
+```
 Sandbox for lodash:
   - Runtime: Node.js with limited permissions
   - Network: restricted to whitelisted registries
@@ -207,37 +234,31 @@ Sandbox for lodash:
 
 ### compare
 
-Compare two installed packages side by side.
+Compare two installed packages.
 
 ```
 manpm compare <package1> <package2>
 ```
 
-Reads both `package.json` files from `node_modules/` and compares: version, license, description, homepage, dependency count, dev dependency count.
-
-Example:
-
-```bash
-manpm compare express koa
-```
+Reads both `package.json` files and compares version, license, description, homepage, and dependency counts.
 
 ---
 
 ### sensei
 
-Full project architecture review.
+Run a full project architecture review.
 
 ```
 manpm sensei
 ```
 
-Lists all files in the project root, checks for config files (package.json, package-lock.json, .npmrc, .nvmrc), scans for known vulnerabilities, and checks `node_modules` status.
+Lists all files in the project root, checks for config files (package.json, package-lock.json, .npmrc, .nvmrc), scans for known vulnerabilities if a lockfile exists, and reports `node_modules` status.
 
 ---
 
 ### profile
 
-Manage installation profiles defined in `manpm.config.toml`.
+Manage installation profiles.
 
 ```
 manpm profile <subcommand> [name]
@@ -252,7 +273,7 @@ manpm profile <subcommand> [name]
 
 Examples:
 
-```bash
+```
 manpm profile list
 manpm profile use strict
 manpm profile create custom
