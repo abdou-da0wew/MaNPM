@@ -1,0 +1,66 @@
+{
+  "image_theme": "Dark mode with high-contrast energetic accents",
+  "color_palette": [
+    {
+      "name": "Rich Black",
+      "hex": "#050403",
+      "rgb": "rgb(5, 4, 3)",
+      "usage": "Primary background (left side), deep shadows"
+    },
+    {
+      "name": "Vibrant Orange",
+      "hex": "#E35A00",
+      "rgb": "rgb(227, 90, 0)",
+      "usage": "Mid-tones of the background gradient, 'manpm' lightning bolt logo, standard NPM diagram arrow"
+    },
+    {
+      "name": "Golden Flare",
+      "hex": "#FCA710",
+      "rgb": "rgb(252, 167, 16)",
+      "usage": "Brightest light source on the right, logo highlights, glowing hexagon outlines"
+    },
+    {
+      "name": "Pure White",
+      "hex": "#FFFFFF",
+      "rgb": "rgb(255, 255, 255)",
+      "usage": "Main 'manpm' text, 'M' logo base, Gopher eyes"
+    },
+    {
+      "name": "Soft Light Gray",
+      "hex": "#DFDFDF",
+      "rgb": "rgb(223, 223, 223)",
+      "usage": "Subtitle text ('The blazing-fast Golang orchestrator...'), diagram labels"
+    },
+    {
+      "name": "Dark Charcoal / Slate",
+      "hex": "#1F2328",
+      "rgb": "rgb(31, 35, 40)",
+      "usage": "Background panels for the two diagram UI boxes"
+    },
+    {
+      "name": "Electric Cyan",
+      "hex": "#6CD0E5",
+      "rgb": "rgb(108, 208, 229)",
+      "usage": "Top parallel arrows in the bottom diagram, Go Gopher body"
+    },
+    {
+      "name": "Coral Red",
+      "hex": "#E24F44",
+      "rgb": "rgb(226, 79, 68)",
+      "usage": "Bottom parallel arrow in the 'manpm (Parallel)' diagram"
+    },
+    {
+      "name": "Warm Beige / Tan",
+      "hex": "#D3A970",
+      "rgb": "rgb(211, 169, 112)",
+      "usage": "Package-lock.json document icon, package boxes, Go Gopher face and thumbs up"
+    },
+    {
+      "name": "Amber Glow",
+      "hex": "#9A4000",
+      "rgb": "rgb(154, 64, 0)",
+      "usage": "Transitional dark orange in the ambient background glow and disk bases"
+    }
+  ]
+}
+

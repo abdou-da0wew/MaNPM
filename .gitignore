@@ -1,0 +1,22 @@
+# Binaries
+manpm
+*.exe
+*.test
+
+# Temp files
+/tmp/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Go
+vendor/
+*.out
+
+# IDE
+.idea/
+.vscode/
+*.sublime-*
