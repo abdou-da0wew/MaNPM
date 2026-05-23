@@ -1,91 +1,90 @@
-# MaNPM - The blazing-fast Go NPM Parallel Orchestrator
+# MaNPM
 
-> A high-performance CLI tool written in Go that radically speeds up Node.js package installations by parsing \`package-lock.json\`, topological sorting dependencies, streaming tarballs directly to disk using goroutines, and deferring compilation to standard \`npm\`.
+[![Go](https://img.shields.io/badge/Go-1.26+-00ADD8?style=flat-square)](https://go.dev)
+[![Node](https://img.shields.io/badge/Node.js-18%2B-brightgreen?style=flat-square)](https://nodejs.org)
+[![MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square)](LICENSE)
 
-## Features
+<img src="assets/banner.png" alt="MaNPM banner" width="100%">
 
-- ⚡ **Parallel Extraction** — Downloads and extracts packages concurrently using Go goroutines
-- 📦 **Native Module Support** — Handles node-gyp rebuilds, prebuild-install, and fallback builds
-- 🔍 **Project Intelligence** — \`doctor\`, \`entropy\`, \`explain\`, \`sensei\`, \`map\` for deep project insights
-- 🔒 **Integrity Verification** — SHA512 checksums verified during streaming extraction
-- 🧠 **Context-Aware** — Remembers your preferences, profiles, and project patterns
-- 🎨 **Beautiful CLI** — Colorful output with live spinners, progress bars, and Bun-inspired UX
-- 📝 **TOML Config** — \`manpm.config.toml\` with profiles and per-project overrides
-- 📱 **Cross-Platform** — Linux, macOS, Windows, Android ARM64
+MaNPM is a Go CLI tool that replaces `npm install` with parallel tarball download, SHA512 integrity verification, topological dependency resolution, and native module rebuild orchestration. It has zero external dependencies and runs on Linux, macOS, Windows, and Android ARM64.
 
-## Quick Start
+## Requirements
 
-\`\`\`bash
-# Install dependencies
-manpm install
+- Go 1.26+ (to build from source)
+- Node.js 18+ and npm 9+ (runtime dependency for native rebuild fallback)
 
-# Add a package with smart resolution
-manpm add express --smart
+## Install
 
-# Full project health check
+Build from source. The Go toolchain requires RLock filesystem support; use `/tmp` on systems with fuseblk storage:
+
+```bash
+cp -a /storagesdcard/ManPM/* /tmp/manpm-src/
+cd /tmp/manpm-src && go build -ldflags="-s -w" -o /tmp/manpm ./cmd/manpm/
+```
+
+## Usage
+
+```
+manpm install [options]
+```
+
+This reads `package-lock.json`, builds a dependency DAG, downloads and extracts tarballs in parallel with SHA512 verification, runs native module rebuilds, and links `.bin` executables.
+
+```bash
+manpm install --threads 8
 manpm doctor
-
-# Get a senior dev review
 manpm sensei
-\`\`\`
-
-## Commands
-
-| Command | Description |
-|---------|-------------|
-| \`install\` | Install all dependencies (parallel) |
-| \`add\` | Add a package with impact preview |
-| \`explain\` | Show why a package is installed |
-| \`audit\` | Run vulnerability analysis |
-| \`doctor\` | Analyze project health |
-| \`map\` | Show ASCII dependency graph |
-| \`entropy\` | Measure project chaos level |
-| \`prune\` | Find and remove unused deps |
-| \`sandbox\` | Show isolated install info |
-| \`compare\` | Compare two packages |
-| \`sensei\` | Full project architecture review |
-| \`profile\` | Manage installation profiles |
+manpm add express --dev --exact
+```
 
 ## Configuration
 
-Create \`manpm.config.toml\` in your project root:
+Create `manpm.config.toml` in the project root:
 
-\`\`\`toml
+```toml
 [core]
 parallel_limit = 8
 auto_fix_peers = true
 
-[ui]
-mode = "developer"  # minimal | developer | psychotic
+[install_policy]
+prefer_lockfile = true
+version_strategy = "stable"
 
 [profile.strict]
 ui = "minimal"
 safe_mode = true
-\`\`\`
+```
 
-## How It Works
+See [Configuration](docs/configuration.md) for all fields and profiles.
 
-1. Parses \`package-lock.json\` (v2/v3)
-2. Builds a DAG and topologically sorts dependencies
-3. Groups packages into parallel execution levels
-4. Streams tarballs directly to disk via Go (bypassing npm tree builder)
-5. Verifies SHA512 integrity during download
-6. Runs sequential \`npm rebuild\` for native modules
-7. Links \`.bin\` executables
-8. Reports project health and insights
+## Architecture
 
-## Platform Support
+```
+cmd/manpm/          CLI entry point and subcommand router
+pkg/binlink/        .bin symlink management
+pkg/buildmgr/       Native package rebuild chain
+pkg/cache/          JSON metadata cache
+pkg/config/         TOML config loader (zero dependencies)
+pkg/extractor/      Parallel download, SHA512 verify, tar extraction
+pkg/graph/          DAG builder, topological sort, cycle detection
+pkg/intel/          Project intelligence (explain, audit, doctor, map, entropy, sensei, compare)
+pkg/lockfile/       package-lock.json v2/v3 parser
+pkg/platform/       OS/arch detection, memory-aware worker tuning
+pkg/preflight/      Pre-install validation
+pkg/ui/             ANSI terminal output
+```
 
-| Platform | Status |
-|----------|--------|
-| Linux x86_64 | ✅ |
-| macOS ARM64 | ✅ |
-| macOS x86_64 | ✅ |
-| Windows x86_64 | ✅ |
-| Android ARM64 | ✅ Tested |
-| Linux ARM64 | ✅ |
+See [Architecture](docs/architecture.md) for data flow, design decisions, and the full package reference.
+
+## Documentation
+
+- [Getting Started](docs/getting-started.md)
+- [Commands](docs/commands.md)
+- [Configuration](docs/configuration.md)
+- [Architecture](docs/architecture.md)
+- [Development](docs/development.md)
+- [API Reference](docs/api.md)
 
 ## License
 
 MIT
-
