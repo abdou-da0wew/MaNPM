@@ -1,13 +1,13 @@
 package buildmgr
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -193,9 +193,8 @@ func (bm *BuildManager) tryPrebuild(ctx context.Context, pkg NativePkgInfo) erro
 	for _, tool := range []string{"prebuild-install", "node-pre-gyp", "@mapbox/node-pre-gyp"} {
 		cmd := exec.CommandContext(ctx, "npx", "--yes", tool, "--runtime", "node", "--target", getNodeVersion())
 		cmd.Dir = filepath.Join(bm.NodesDir, pkg.Path)
-		var out bytes.Buffer
-		cmd.Stdout = &out
-		cmd.Stderr = &out
+		cmd.Stdout = os.Stderr
+		cmd.Stderr = os.Stderr
 
 		if err := cmd.Run(); err == nil {
 			return nil
@@ -221,9 +220,8 @@ func (bm *BuildManager) tryNodeGypBuild(ctx context.Context, pkg NativePkgInfo) 
 func (bm *BuildManager) tryNpmRebuild(ctx context.Context, pkg NativePkgInfo) error {
 	cmd := exec.CommandContext(ctx, "npm", "rebuild", pkg.Name, "--foreground-scripts")
 	cmd.Dir = bm.Dir
-	var out bytes.Buffer
-	cmd.Stdout = &out
-	cmd.Stderr = &out
+	cmd.Stdout = os.Stderr
+	cmd.Stderr = os.Stderr
 
 	return cmd.Run()
 }
@@ -254,6 +252,119 @@ func (bm *BuildManager) RunInstallScripts(ctx context.Context) error {
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		cmd.Run()
+	}
+
+	return nil
+}
+
+func (bm *BuildManager) RunProjectScript(ctx context.Context, scriptName string) error {
+	pkgJSON := filepath.Join(bm.Dir, "package.json")
+	data, err := os.ReadFile(pkgJSON)
+	if err != nil {
+		return fmt.Errorf("read package.json: %w", err)
+	}
+
+	var pkg struct {
+		Name    string            `json:"name"`
+		Version string            `json:"version"`
+		Scripts map[string]string `json:"scripts"`
+	}
+	if err := json.Unmarshal(data, &pkg); err != nil {
+		return fmt.Errorf("parse package.json: %w", err)
+	}
+
+	script, ok := pkg.Scripts[scriptName]
+	if !ok {
+		return fmt.Errorf("missing script: %q (available: %v)", scriptName, mapKeys(pkg.Scripts))
+	}
+
+	name := pkg.Name
+	if name == "" {
+		name = filepath.Base(bm.Dir)
+	}
+	version := pkg.Version
+	if version == "" {
+		version = "1.0.0"
+	}
+	fmt.Fprintf(os.Stderr, "\n> %s@%s %s %s\n", name, version, scriptName, bm.Dir)
+	fmt.Fprintf(os.Stderr, "> %s\n\n", script)
+
+	cmd := exec.CommandContext(ctx, "sh", "-c", script)
+	cmd.Dir = bm.Dir
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.Env = append(os.Environ(),
+		"npm_package_name="+name,
+		"npm_package_version="+version,
+		"npm_lifecycle_event="+scriptName,
+	)
+
+	return cmd.Run()
+}
+
+func mapKeys(m map[string]string) string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return strings.Join(keys, ", ")
+}
+
+func (bm *BuildManager) RunPostinstallScripts(ctx context.Context) error {
+	native, err := bm.DetectNativePackages(ctx)
+	if err != nil {
+		return err
+	}
+
+	for _, pkg := range native {
+		if !pkg.HasInstallScript {
+			continue
+		}
+		pkgDir := filepath.Join(bm.NodesDir, pkg.Path)
+		pkgJSON := filepath.Join(pkgDir, "package.json")
+
+		data, err := os.ReadFile(pkgJSON)
+		if err != nil {
+			continue
+		}
+
+		var pkgDef struct {
+			Name    string            `json:"name"`
+			Version string            `json:"version"`
+			Scripts map[string]string `json:"scripts"`
+		}
+		if err := json.Unmarshal(data, &pkgDef); err != nil {
+			continue
+		}
+
+		for _, scriptName := range []string{"preinstall", "install", "postinstall"} {
+			script, ok := pkgDef.Scripts[scriptName]
+			if !ok {
+				continue
+			}
+
+			name := pkgDef.Name
+			if name == "" {
+				name = pkg.Path
+			}
+			fmt.Fprintf(os.Stderr, "\n> %s@%s %s\n", name, pkgDef.Version, scriptName)
+			fmt.Fprintf(os.Stderr, "> %s\n\n", script)
+
+			cmd := exec.CommandContext(ctx, "sh", "-c", script)
+			cmd.Dir = pkgDir
+			cmd.Stdout = os.Stdout
+			cmd.Stderr = os.Stderr
+			cmd.Env = append(os.Environ(),
+				"npm_package_name="+name,
+				"npm_package_version="+pkgDef.Version,
+				"npm_lifecycle_event="+scriptName,
+			)
+
+			if err := cmd.Run(); err != nil {
+				fmt.Fprintf(os.Stderr, "\n%s\u26a0 Script %q for %s failed: %v%s\n", "\033[33m", scriptName, name, err, "\033[0m")
+			}
+		}
 	}
 
 	return nil

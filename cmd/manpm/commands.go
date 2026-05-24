@@ -1,12 +1,21 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"unicode"
 
+	"manpm/pkg/binlink"
+	"manpm/pkg/buildmgr"
+	"manpm/pkg/extractor"
+	"manpm/pkg/graph"
 	"manpm/pkg/intel"
+	"manpm/pkg/lockfile"
+	"manpm/pkg/preflight"
 	"manpm/pkg/ui"
 )
 
@@ -38,7 +47,38 @@ type Config struct {
 	Retries      int
 }
 
-func run(cfg Config) error {
+func buildGraph(dir string) (*graph.DependencyGraph, error) {
+	lfPath, err := lockfile.FindLockfile(dir)
+	if err != nil {
+		return nil, err
+	}
+	lf, err := lockfile.Parse(lfPath)
+	if err != nil {
+		return nil, err
+	}
+	dag := graph.NewDependencyGraph()
+	for key, pkg := range lf.Packages {
+		if key == "" {
+			continue
+		}
+		name := strings.TrimPrefix(key, "node_modules/")
+		dag.AddNode(name, pkg.Version, pkg.Resolved, pkg.Integrity, pkg.Dependencies)
+	}
+	if err := dag.TopologicalSort(); err != nil {
+		if len(dag.Levels) == 0 {
+			flat := make([]*graph.PackageNode, 0, len(dag.Nodes))
+			for _, node := range dag.Nodes {
+				flat = append(flat, node)
+			}
+			dag.Levels = [][]*graph.PackageNode{flat}
+		}
+	}
+	return dag, nil
+}
+
+func runInstall(cfg Config, dir string) error {
+	ctx := context.Background()
+
 	ui.Header("manpm install")
 	ui.Label("Threads", fmt.Sprintf("%d", cfg.Threads))
 	ui.Label("Mode", cfg.LaneMode)
@@ -59,6 +99,145 @@ func run(cfg Config) error {
 	if cfg.ForceRebuild {
 		ui.Info("Force rebuild enabled")
 	}
+
+	ui.Subheader("Preflight")
+	res, err := preflight.Run(dir)
+	if err != nil {
+		return fmt.Errorf("preflight: %w", err)
+	}
+	preflight.PrintSummary(res)
+
+	ui.Subheader("Lockfile")
+	lf, err := lockfile.Parse(res.LockfilePath)
+	if err != nil {
+		return fmt.Errorf("parse lockfile: %w", err)
+	}
+	ui.Label("Packages", fmt.Sprintf("%d", len(lf.Packages)))
+
+	ui.Subheader("Dependency Graph")
+	dag := graph.NewDependencyGraph()
+	for key, pkg := range lf.Packages {
+		if key == "" {
+			continue
+		}
+		name := strings.TrimPrefix(key, "node_modules/")
+		dag.AddNode(name, pkg.Version, pkg.Resolved, pkg.Integrity, pkg.Dependencies)
+	}
+	if err := dag.TopologicalSort(); err != nil {
+		ui.Warning(fmt.Sprintf("Dependency graph: %v — extracting all packages in one pass", err))
+		if len(dag.Levels) == 0 {
+			flat := make([]*graph.PackageNode, 0, len(dag.Nodes))
+			for _, node := range dag.Nodes {
+				flat = append(flat, node)
+			}
+			dag.Levels = [][]*graph.PackageNode{flat}
+		}
+	}
+	ui.Label("Levels", fmt.Sprintf("%d", len(dag.Levels)))
+	ui.Label("Packages", fmt.Sprintf("%d", len(dag.Nodes)))
+
+	if dag.HasCycle() {
+		ui.Warning("Circular dependencies detected")
+	}
+
+	if cfg.DryRun {
+		for i, level := range dag.Levels {
+			names := make([]string, 0, len(level))
+			for _, n := range level {
+				names = append(names, n.Name)
+			}
+			ui.Label(fmt.Sprintf("Level %d", i), fmt.Sprintf("%d (%s)", len(level), strings.Join(names, ", ")))
+		}
+		ui.Success("Dry-run complete")
+		return nil
+	}
+
+	ui.Subheader("Extraction")
+	extr := extractor.NewExtractor(dir, cfg.Threads)
+	extr.MaxRetries = cfg.Retries
+
+	totalExtracted := 0
+	var failedExtractions []string
+	for levelIdx, level := range dag.Levels {
+		jobs := make([]extractor.PackageJob, 0, len(level))
+		for _, node := range level {
+			jobs = append(jobs, extractor.PackageJob{
+				Name:       node.Name,
+				Path:       node.Name,
+				TarballURL: node.Resolved,
+				Integrity:  node.Integrity,
+			})
+		}
+		prog := ui.NewProgress(len(jobs))
+		prog.Start()
+		extr.OnProgress = func(completed, total int, name string, err error) {
+			if err != nil {
+				prog.Update(name + " ⚠")
+			} else {
+				prog.Inc(name)
+			}
+		}
+		results := extr.ExtractLevel(ctx, jobs)
+		prog.Done(fmt.Sprintf("Level %d: %d packages", levelIdx, len(jobs)))
+		for _, r := range results {
+			if r.Error != nil {
+				failedExtractions = append(failedExtractions, r.PackageName)
+			} else {
+				totalExtracted++
+			}
+		}
+	}
+	ui.Label("Extracted", fmt.Sprintf("%d packages", totalExtracted))
+	if len(failedExtractions) > 0 {
+		ui.Label("Failed", fmt.Sprintf("%d packages", len(failedExtractions)))
+	}
+
+	bm := buildmgr.NewBuildManager(dir)
+	bm.Verbose = cfg.ForceRebuild
+	if !cfg.SkipRebuild {
+		ui.Subheader("Native Rebuild")
+		var rebuildErr error
+		if cfg.LaneMode == "sequential" {
+			rebuildErr = bm.RebuildSequential(ctx)
+		} else {
+			rebuildErr = bm.RebuildAll(ctx)
+		}
+		if rebuildErr != nil {
+			ui.Warning(fmt.Sprintf("Rebuild: %v", rebuildErr))
+		} else {
+			ui.Success("Native rebuilds complete")
+		}
+	} else {
+		ui.Info("Skipping native rebuild")
+	}
+
+	if !cfg.SkipBinlink {
+		ui.Subheader("Binary Linking")
+		var pkgPaths []string
+		for _, level := range dag.Levels {
+			for _, node := range level {
+				pkgPaths = append(pkgPaths, node.Name)
+			}
+		}
+		linker := binlink.NewLinker(filepath.Join(dir, "node_modules"))
+		if err := linker.LinkAllPackages(ctx, pkgPaths); err != nil {
+			ui.Warning(fmt.Sprintf("Binlink: %v", err))
+		} else {
+			ui.Label("Linked", fmt.Sprintf("%d packages", len(pkgPaths)))
+		}
+	} else {
+		ui.Info("Skipping binlink")
+	}
+
+	if !cfg.SkipScripts {
+		ui.Subheader("Lifecycle Scripts")
+		if err := bm.RunPostinstallScripts(ctx); err != nil {
+			ui.Warning(fmt.Sprintf("Scripts: %v", err))
+		} else {
+			ui.Success("Lifecycle scripts complete")
+		}
+	}
+
 	ui.Success("Install complete")
 	return nil
 }
@@ -110,7 +289,8 @@ func buildRouter() Command {
 				ForceRebuild: *forceRebuild,
 				Retries:      *retries,
 			}
-			return run(cfg)
+			dir, _ := os.Getwd()
+			return runInstall(cfg, dir)
 		},
 	}
 
@@ -176,7 +356,12 @@ func buildRouter() Command {
 		Description: "Run vulnerability analysis",
 		Usage:       "manpm audit",
 		Run: func(args []string) error {
-			results, err := intel.Audit("package-lock.json")
+			dir, _ := os.Getwd()
+			lfPath, err := lockfile.FindLockfile(dir)
+			if err != nil {
+				return err
+			}
+			results, err := intel.Audit(lfPath)
 			if err != nil {
 				return err
 			}
@@ -200,7 +385,12 @@ func buildRouter() Command {
 		Description: "Analyze project health",
 		Usage:       "manpm doctor",
 		Run: func(args []string) error {
-			result, err := intel.Doctor(".", nil)
+			dir, _ := os.Getwd()
+			dag, err := buildGraph(dir)
+			if err != nil {
+				dag = nil
+			}
+			result, err := intel.Doctor(dir, dag)
 			if err != nil {
 				return err
 			}
@@ -231,8 +421,15 @@ func buildRouter() Command {
 		Description: "Show ASCII dependency graph",
 		Usage:       "manpm map",
 		Run: func(args []string) error {
+			dir, _ := os.Getwd()
+			dag, err := buildGraph(dir)
+			if err != nil {
+				ui.Header("Dependency Graph")
+				fmt.Println(intel.Map(nil))
+				return nil
+			}
 			ui.Header("Dependency Graph")
-			fmt.Println(intel.Map(nil))
+			fmt.Println(intel.Map(dag))
 			return nil
 		},
 	}
@@ -242,7 +439,12 @@ func buildRouter() Command {
 		Description: "Show project chaos metrics",
 		Usage:       "manpm entropy",
 		Run: func(args []string) error {
-			result := intel.Entropy(nil)
+			dir, _ := os.Getwd()
+			dag, err := buildGraph(dir)
+			if err != nil {
+				dag = nil
+			}
+			result := intel.Entropy(dag)
 			ui.Header("Project Entropy")
 			ui.Label("Score", fmt.Sprintf("%.2f", result.Score))
 			ui.Label("Total packages", fmt.Sprintf("%d", result.TotalPackages))
@@ -330,6 +532,20 @@ func buildRouter() Command {
 		},
 	}
 
+	runCmd := Command{
+		Name:        "run",
+		Description: "Run a project script (e.g. manpm run build)",
+		Usage:       "manpm run <script>",
+		Run: func(args []string) error {
+			if len(args) == 0 {
+				return fmt.Errorf("usage: manpm run <script>")
+			}
+			dir, _ := os.Getwd()
+			bm := buildmgr.NewBuildManager(dir)
+			return bm.RunProjectScript(context.Background(), args[0])
+		},
+	}
+
 	var profileCmd Command
 	profileCmd = Command{
 		Name:        "profile",
@@ -402,6 +618,7 @@ func buildRouter() Command {
 		mapCmd,
 		entropyCmd,
 		pruneCmd,
+		runCmd,
 		sandboxCmd,
 		compareCmd,
 		senseiCmd,
@@ -411,12 +628,32 @@ func buildRouter() Command {
 	return root
 }
 
+var aliases = map[string]string{
+	"i":     "install",
+	"in":    "install",
+	"inst":  "install",
+	"r":     "run",
+	"ad":    "add",
+	"ex":    "explain",
+	"au":    "audit",
+	"doc":   "doctor",
+	"pr":    "prune",
+	"sb":    "sandbox",
+	"cmp":   "compare",
+	"pro":   "profile",
+	"se":    "sensei",
+	"ls":    "map",
+}
+
 func dispatch(root Command, args []string) error {
 	if len(args) == 0 {
 		return root.Subcommands[0].Run(nil)
 	}
 
 	name := args[0]
+	if full, ok := aliases[name]; ok {
+		name = full
+	}
 	rest := args[1:]
 
 	for _, cmd := range root.Subcommands {

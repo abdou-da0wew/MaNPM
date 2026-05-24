@@ -1,6 +1,8 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -10,8 +12,8 @@ func TestBuildRouter(t *testing.T) {
 	if root.Name != "manpm" {
 		t.Errorf("expected manpm, got %q", root.Name)
 	}
-	if len(root.Subcommands) != 12 {
-		t.Errorf("expected 12 commands, got %d", len(root.Subcommands))
+	if len(root.Subcommands) != 13 {
+		t.Errorf("expected 13 commands, got %d", len(root.Subcommands))
 	}
 }
 
@@ -25,7 +27,7 @@ func TestRouterCommands(t *testing.T) {
 		names[cmd.Name] = true
 	}
 
-	expected := []string{"install", "add", "explain", "audit", "doctor", "map", "entropy", "prune", "sandbox", "compare", "sensei", "profile"}
+	expected := []string{"install", "add", "explain", "audit", "doctor", "map", "entropy", "prune", "run", "sandbox", "compare", "sensei", "profile"}
 	for _, name := range expected {
 		if !names[name] {
 			t.Errorf("missing command: %s", name)
@@ -33,28 +35,45 @@ func TestRouterCommands(t *testing.T) {
 	}
 }
 
+func withInstallDir(t *testing.T, fn func()) {
+	t.Helper()
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "package.json"), []byte(`{"name":"test","dependencies":{"left-pad":"^1.0.0"}}`), 0644)
+	os.WriteFile(filepath.Join(dir, "package-lock.json"), []byte(`{"name":"test","lockfileVersion":3,"packages":{"":{"name":"test","dependencies":{"left-pad":"^1.0.0"}},"node_modules/left-pad":{"version":"1.3.0"}}}`), 0644)
+	oldDir, _ := os.Getwd()
+	os.Chdir(dir)
+	defer os.Chdir(oldDir)
+	fn()
+}
+
 func TestDispatchDefault(t *testing.T) {
-	root := buildRouter()
-	err := dispatch(root, []string{})
-	if err != nil {
-		t.Fatalf("dispatch with no args failed: %v", err)
-	}
+	withInstallDir(t, func() {
+		root := buildRouter()
+		err := dispatch(root, []string{})
+		if err != nil {
+			t.Fatalf("dispatch with no args failed: %v", err)
+		}
+	})
 }
 
 func TestDispatchInstall(t *testing.T) {
-	root := buildRouter()
-	err := dispatch(root, []string{"install"})
-	if err != nil {
-		t.Fatalf("dispatch install failed: %v", err)
-	}
+	withInstallDir(t, func() {
+		root := buildRouter()
+		err := dispatch(root, []string{"install"})
+		if err != nil {
+			t.Fatalf("dispatch install failed: %v", err)
+		}
+	})
 }
 
 func TestDispatchInstallWithFlags(t *testing.T) {
-	root := buildRouter()
-	err := dispatch(root, []string{"install", "--threads", "4", "--dry-run", "--retries", "5"})
-	if err != nil {
-		t.Fatalf("dispatch install with flags failed: %v", err)
-	}
+	withInstallDir(t, func() {
+		root := buildRouter()
+		err := dispatch(root, []string{"install", "--threads", "4", "--dry-run", "--retries", "5"})
+		if err != nil {
+			t.Fatalf("dispatch install with flags failed: %v", err)
+		}
+	})
 }
 
 func TestDispatchAdd(t *testing.T) {
@@ -354,6 +373,9 @@ func TestConfigDefaults(t *testing.T) {
 }
 
 func TestRunConfig(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "package.json"), []byte(`{"name":"test","dependencies":{"left-pad":"^1.0.0"}}`), 0644)
+	os.WriteFile(filepath.Join(dir, "package-lock.json"), []byte(`{"name":"test","lockfileVersion":3,"packages":{"":{"name":"test","dependencies":{"left-pad":"^1.0.0"}},"node_modules/left-pad":{"version":"1.3.0"}}}`), 0644)
 	cfg := Config{
 		Threads:      4,
 		LaneMode:     "parallel",
@@ -365,25 +387,30 @@ func TestRunConfig(t *testing.T) {
 		ForceRebuild: true,
 		Retries:      5,
 	}
-	err := run(cfg)
+	err := runInstall(cfg, dir)
 	if err != nil {
-		t.Errorf("run failed: %v", err)
+		t.Errorf("runInstall failed: %v", err)
 	}
 }
 
 func TestRunConfigDefault(t *testing.T) {
-	err := run(Config{})
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "package.json"), []byte(`{"name":"test"}`), 0644)
+	os.WriteFile(filepath.Join(dir, "package-lock.json"), []byte(`{"name":"test","lockfileVersion":3,"packages":{"":{"name":"test"}}}`), 0644)
+	err := runInstall(Config{DryRun: true}, dir)
 	if err != nil {
-		t.Errorf("run with zero config failed: %v", err)
+		t.Errorf("runInstall with zero config failed: %v", err)
 	}
 }
 
 func TestDispatchInstallFlags(t *testing.T) {
-	root := buildRouter()
-	err := dispatch(root, []string{"install", "--threads", "8", "--lane-mode", "sequential", "--priority-lock", "--retries", "3"})
-	if err != nil {
-		t.Errorf("install with all flags failed: %v", err)
-	}
+	withInstallDir(t, func() {
+		root := buildRouter()
+		err := dispatch(root, []string{"install", "--threads", "8", "--lane-mode", "sequential", "--priority-lock", "--retries", "3"})
+		if err != nil {
+			t.Errorf("install with all flags failed: %v", err)
+		}
+	})
 }
 
 func TestAddAllFlags(t *testing.T) {
@@ -462,21 +489,25 @@ func TestDispatchPruneSafe(t *testing.T) {
 }
 
 func TestDispatchInstallAllBooleans(t *testing.T) {
-	root := buildRouter()
-	err := dispatch(root, []string{"install", "--skip-rebuild", "--skip-binlink", "--skip-scripts", "--force-rebuild", "--dry-run"})
-	if err != nil {
-		t.Errorf("install with all boolean flags failed: %v", err)
-	}
+	withInstallDir(t, func() {
+		root := buildRouter()
+		err := dispatch(root, []string{"install", "--skip-rebuild", "--skip-binlink", "--skip-scripts", "--force-rebuild", "--dry-run"})
+		if err != nil {
+			t.Errorf("install with all boolean flags failed: %v", err)
+		}
+	})
 }
 
 func TestOutputContainsExpected(t *testing.T) {
 	root := buildRouter()
 	var err error
 
-	err = dispatch(root, []string{"install"})
-	if err != nil {
-		t.Errorf("install dispatch: %v", err)
-	}
+	withInstallDir(t, func() {
+		err = dispatch(root, []string{"install"})
+		if err != nil {
+			t.Errorf("install dispatch: %v", err)
+		}
+	})
 
 	err = dispatch(root, []string{"add", "lodash"})
 	if err != nil {
@@ -527,11 +558,13 @@ func TestCommandStructFlags(t *testing.T) {
 }
 
 func TestDispatchNoArgsCallsInstall(t *testing.T) {
-	root := buildRouter()
-	err := dispatch(root, []string{})
-	if err != nil {
-		t.Errorf("dispatch no args should call install: %v", err)
-	}
+	withInstallDir(t, func() {
+		root := buildRouter()
+		err := dispatch(root, []string{})
+		if err != nil {
+			t.Errorf("dispatch no args should call install: %v", err)
+		}
+	})
 }
 
 func TestRouterSubCommandsNotEmpty(t *testing.T) {

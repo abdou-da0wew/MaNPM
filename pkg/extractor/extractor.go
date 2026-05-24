@@ -40,6 +40,7 @@ type Extractor struct {
 	Concurrency int
 	FallbackDir string
 	MaxRetries  int
+	OnProgress  func(completed, total int, name string, err error)
 }
 
 func NewExtractor(baseDir string, numWorkers int) *Extractor {
@@ -321,8 +322,13 @@ func (e *Extractor) ExtractLevel(ctx context.Context, jobs []PackageJob) []Extra
 	close(resultCh)
 
 	var results []ExtractResult
+	completed := 0
 	for r := range resultCh {
 		results = append(results, r)
+		completed++
+		if e.OnProgress != nil {
+			e.OnProgress(completed, len(jobs), r.PackageName, r.Error)
+		}
 	}
 	return results
 }
