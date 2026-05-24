@@ -1,0 +1,94 @@
+---
+url: /agents/workflow.toon
+description: >-
+  Common MaNPM development workflows: building, testing, adding a command,
+  modifying the pipeline, adding a package, and pushing changes.
+---
+
+workflows[6]{name,steps,notes}:
+
+  - name: build
+    steps[4]:
+      - "cp -a /storagesdcard/ManPM/* /tmp/manpm-src/"
+      - "cd /tmp/manpm-src && go build -ldflags='-s -w' -o /tmp/manpm ./cmd/manpm/"
+      - "cp -a /tmp/manpm-src/* /storagesdcard/ManPM/"
+    notes: >
+      Build MUST be done from /tmp because /storagesdcard uses fuseblk which
+      has RLock incompatibility with Go. Use -ldflags=-s -w to strip debug
+      info and minimize binary size (~2.4MB stripped ARM64).
+
+  - name: test
+    steps[4]:
+      - "cp -a /storagesdcard/ManPM/* /tmp/manpm-src/"
+      - "cd /tmp/manpm-src && go test ./..."
+      - "cd /tmp/manpm-src && go vet ./..."
+      - "cp -a /tmp/manpm-src/* /storagesdcard/ManPM/"
+    notes[4]:
+      - "pkg/intel tests: Explain/Audit/Compare/Sensei work against scratch temp dirs, not live project — no live npm needed"
+      - "pkg/buildmgr tests: create mock node_modules/ trees with binding.gyp and package.json fixtures"
+      - "cmd/manpm tests: call dispatch() directly. --help handling is in main(), not dispatch() — test the Run func or dispatch(), not main()"
+      - "ANSI output to stdout in tests is expected, not a failure"
+
+  - name: add-command
+    steps[6]:
+      - "Define Command struct in buildRouter() inside cmd/manpm/commands.go"
+      - "Set Name, Description, Usage, Flags ([]Flag struct), and Run func"
+      - "Append command to root.Subcommands slice"
+      - "Add alias entry in aliases map if desired"
+      - "Implement the Run func — parse flags with flag.NewFlagSet, get args with fs.Arg(n)"
+      - "Add dispatch tests in cmd/manpm/manpm_test.go"
+    patterns:
+      flag_parsing: >
+        Use flag.NewFlagSet(name, flag.ContinueOnError) for per-command flags.
+        Access positional args via fs.Arg(0), fs.Arg(1), etc. Use
+        os.Getwd() for project directory.
+      dispatch_routing: >
+        Commands are dispatched by match on cmd.Name. dispatch() handles
+        alias resolution via the aliases map. dispatchSub() handles
+        subcommands (used by profile). No changes needed to dispatch().
+      suggestions: >
+        Unknown commands trigger levenshtein-based suggestions
+        (distance <= 2) via findSuggestions().
+
+  - name: modify-pipeline
+    description: Modify the install pipeline (add/modify a stage)
+    pipeline_stages[6]:
+      - preflight.Run(dir) — validate project
+      - lockfile.Parse() — parse package-lock.json
+      - graph.DependencyGraph — build DAG + TopologicalSort
+      - extractor.ExtractLevel() — download and extract
+      - buildmgr.RebuildAll/RebuildSequential — native module rebuild
+      - binlink.LinkAllPackages — .bin symlinks
+    integration_points[5]:
+      - "runInstall() in commands.go: the orchestrator. Adds stages here."
+      - "Config struct in commands.go: add new field, parse in flag.FlagSet, thread through runInstall()"
+      - "New extractor stage: add method to Extractor struct in pkg/extractor/extractor.go"
+      - "New analysis stage: add function to pkg/intel/intel.go, call in runInstall()"
+      - "Require context.Context as first param for any blocking function"
+    tests: "Update pkg/*_test.go and cmd/manpm/manpm_test.go"
+
+  - name: add-package
+    steps[6]:
+      - "Create pkg/<name>/ directory with implementation file(s)"
+      - "Write _test.go with table-driven tests using t.TempDir() for isolation"
+      - "Use only Go standard library — no external deps"
+      - "Import as manpm/pkg/<name> in cmd/manpm/commands.go or other packages"
+      - "Use context.Context as first param for blocking functions"
+      - "Error types wrapping other errors should implement Unwrap()"
+    conventions:
+      files_per_package: "One file per package (plus _test.go) — except config/ (config.go + toml.go) and ui/ (ui.go + progress.go)"
+      concurrency: "Use sync.WaitGroup + buffered channels for worker pools. Protect shared state with sync.RWMutex."
+      naming: "Exported types PascalCase, unexported camelCase. Constructor: New<Type>()."
+      testing: "Use t.TempDir() for isolated test directories. Table-driven tests preferred."
+
+  - name: push
+    steps[5]:
+      - "cp -a /tmp/manpm-src/* /storagesdcard/ManPM/  # if built from /tmp"
+      - "cd /storagesdcard/ManPM"
+      - "git add -A"
+      - "git commit -m '<conventional-commit message>'"
+      - "git push origin main"
+    notes[3]:
+      - "SSH only — key at ~/.ssh/id_rsa"
+      - "Remote: git@github.com:abdou-da0wew/MaNPM.git"
+      - "Run go vet ./... before committing"

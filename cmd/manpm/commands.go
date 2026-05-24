@@ -1,16 +1,22 @@
 package main
 
 import (
+	"bufio"
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"regexp"
+	"sort"
 	"strings"
 	"unicode"
 
 	"manpm/pkg/binlink"
 	"manpm/pkg/buildmgr"
+	"manpm/pkg/config"
 	"manpm/pkg/extractor"
 	"manpm/pkg/graph"
 	"manpm/pkg/intel"
@@ -328,7 +334,41 @@ func buildRouter() Command {
 			ui.Label("Peer fix", fmt.Sprintf("%v", *peerFix))
 			ui.Label("Dev", fmt.Sprintf("%v", *dev))
 			ui.Label("Exact", fmt.Sprintf("%v", *exact))
-			ui.Success("Simulated add complete")
+
+			dir, _ := os.Getwd()
+			if *why {
+				info, err := intel.Explain(".", pkg)
+				if err == nil {
+					fmt.Print(info)
+				}
+				return nil
+			}
+
+			if *dryRun != "" {
+				ui.Success("Would install: " + pkg)
+				return nil
+			}
+
+			npmArgs := []string{"install", pkg}
+			if *dev {
+				npmArgs = append(npmArgs, "--save-dev")
+			}
+			if *exact {
+				npmArgs = append(npmArgs, "--save-exact")
+			}
+
+			ui.Subheader("Installing")
+			ui.Label("Running", "npm "+strings.Join(npmArgs, " "))
+
+			cmd := exec.CommandContext(context.Background(), "npm", npmArgs...)
+			cmd.Dir = dir
+			cmd.Stdout = os.Stderr
+			cmd.Stderr = os.Stderr
+			if err := cmd.Run(); err != nil {
+				return fmt.Errorf("npm install failed: %w", err)
+			}
+
+			ui.Success("Added " + pkg)
 			return nil
 		},
 	}
@@ -468,7 +508,7 @@ func buildRouter() Command {
 		},
 		Run: func(args []string) error {
 			fs := flag.NewFlagSet("prune", flag.ContinueOnError)
-			safe := fs.Bool("safe", false, "Safe mode")
+			safe := fs.Bool("safe", false, "Safe mode (keep packages with recent usage)")
 			dryRun := fs.Bool("dry-run", false, "Only show what would be removed")
 			if err := fs.Parse(args); err != nil {
 				return err
@@ -476,11 +516,109 @@ func buildRouter() Command {
 			ui.Header("Prune")
 			ui.Label("Safe", fmt.Sprintf("%v", *safe))
 			ui.Label("Dry-run", fmt.Sprintf("%v", *dryRun))
-			if *dryRun {
-				ui.Info("Would remove: left-pad, is-odd, some-dep")
-			} else {
-				ui.Warning("No packages removed (dry-run not set)")
+
+			dir, _ := os.Getwd()
+
+			pkgJSONPath := filepath.Join(dir, "package.json")
+			data, err := os.ReadFile(pkgJSONPath)
+			if err != nil {
+				return fmt.Errorf("read package.json: %w", err)
 			}
+			var pkgJSON struct {
+				Dependencies     map[string]string `json:"dependencies"`
+				DevDependencies  map[string]string `json:"devDependencies"`
+				PeerDependencies map[string]string `json:"peerDependencies"`
+			}
+			if err := json.Unmarshal(data, &pkgJSON); err != nil {
+				return fmt.Errorf("parse package.json: %w", err)
+			}
+
+			dag, err := buildGraph(dir)
+			if err != nil {
+				ui.Warning("No lockfile graph — falling back to node_modules scan")
+				dag = nil
+			}
+
+			imported := scanImports(dir)
+
+			used := map[string]bool{}
+			for name := range imported {
+				used[name] = true
+			}
+
+			if dag != nil {
+				for _, node := range dag.Nodes {
+					if used[node.Name] {
+						for _, dep := range node.Dependencies {
+							used[dep] = true
+						}
+					}
+				}
+			}
+
+			topLevelDeps := map[string]bool{}
+			for name := range pkgJSON.Dependencies {
+				topLevelDeps[name] = true
+			}
+			for name := range pkgJSON.DevDependencies {
+				topLevelDeps[name] = true
+			}
+			for name := range pkgJSON.PeerDependencies {
+				topLevelDeps[name] = true
+			}
+
+			var unusedTopLevel []string
+			for name := range topLevelDeps {
+				if !used[name] {
+					unusedTopLevel = append(unusedTopLevel, name)
+				}
+			}
+			sort.Strings(unusedTopLevel)
+
+			var unusedTransitive []string
+			if dag != nil {
+				for _, node := range dag.Nodes {
+					if !topLevelDeps[node.Name] && !used[node.Name] {
+						unusedTransitive = append(unusedTransitive, node.Name)
+					}
+				}
+				sort.Strings(unusedTransitive)
+			}
+
+			if len(unusedTopLevel) == 0 && len(unusedTransitive) == 0 {
+				ui.Success("All packages are in use")
+				return nil
+			}
+
+			if len(unusedTopLevel) > 0 {
+				ui.Label("Unused top-level", fmt.Sprintf("%d packages", len(unusedTopLevel)))
+				for _, name := range unusedTopLevel {
+					ui.Info("  " + name)
+				}
+			}
+			if len(unusedTransitive) > 0 {
+				ui.Label("Unused transitive", fmt.Sprintf("%d packages", len(unusedTransitive)))
+			}
+
+			if *dryRun || *safe {
+				return nil
+			}
+
+			nmDir := filepath.Join(dir, "node_modules")
+			for _, name := range unusedTopLevel {
+				if err := os.RemoveAll(filepath.Join(nmDir, name)); err != nil {
+					ui.Warning(fmt.Sprintf("Remove %s: %v", name, err))
+					continue
+				}
+				delete(pkgJSON.Dependencies, name)
+				delete(pkgJSON.DevDependencies, name)
+				delete(pkgJSON.PeerDependencies, name)
+				ui.Label("Removed", name)
+			}
+
+			updated, _ := json.MarshalIndent(pkgJSON, "", "  ")
+			os.WriteFile(pkgJSONPath, updated, 0644)
+			ui.Success(fmt.Sprintf("Removed %d unused packages and updated package.json", len(unusedTopLevel)))
 			return nil
 		},
 	}
@@ -557,10 +695,27 @@ func buildRouter() Command {
 				Description: "List available profiles",
 				Usage:       "manpm profile list",
 				Run: func(args []string) error {
+					dir, _ := os.Getwd()
+					cfg, err := config.LoadConfig(dir)
+					if err != nil {
+						return err
+					}
 					ui.Subheader("Available profiles")
-					ui.Info("  default  (current)")
-					ui.Info("  fast")
-					ui.Info("  safe")
+					profiles := cfg.ListProfiles()
+					if len(profiles) == 0 {
+						ui.Info("  (no profiles defined)")
+						return nil
+					}
+					for _, name := range profiles {
+						marker := "  "
+						if name == cfg.Profile {
+							marker = "  " + ui.BoldText("➜")
+						}
+						fmt.Printf("%s %s\n", marker, name)
+					}
+					if cfg.Profile != "" {
+						ui.Label("Active", cfg.Profile)
+					}
 					return nil
 				},
 			},
@@ -571,6 +726,19 @@ func buildRouter() Command {
 				Run: func(args []string) error {
 					if len(args) == 0 {
 						return fmt.Errorf("usage: manpm profile use <name>")
+					}
+					dir, _ := os.Getwd()
+					cfg, err := config.LoadConfig(dir)
+					if err != nil {
+						return err
+					}
+					if cfg.GetProfile(args[0]) == nil {
+						available := cfg.ListProfiles()
+						return fmt.Errorf("profile %q not found (available: %v)", args[0], strings.Join(available, ", "))
+					}
+					cfg.SetActiveProfile(args[0])
+					if err := cfg.Save(dir); err != nil {
+						return fmt.Errorf("save config: %w", err)
 					}
 					ui.Success("Switched to profile: " + args[0])
 					return nil
@@ -584,6 +752,21 @@ func buildRouter() Command {
 					if len(args) == 0 {
 						return fmt.Errorf("usage: manpm profile create <name>")
 					}
+					dir, _ := os.Getwd()
+					cfg, err := config.LoadConfig(dir)
+					if err != nil {
+						return err
+					}
+					if cfg.GetProfile(args[0]) != nil {
+						return fmt.Errorf("profile %q already exists", args[0])
+					}
+					cfg.AddProfile(config.Profile{
+						Name:            args[0],
+						VersionStrategy: "stable",
+					})
+					if err := cfg.Save(dir); err != nil {
+						return fmt.Errorf("save config: %w", err)
+					}
 					ui.Success("Created profile: " + args[0])
 					return nil
 				},
@@ -595,6 +778,17 @@ func buildRouter() Command {
 				Run: func(args []string) error {
 					if len(args) == 0 {
 						return fmt.Errorf("usage: manpm profile delete <name>")
+					}
+					dir, _ := os.Getwd()
+					cfg, err := config.LoadConfig(dir)
+					if err != nil {
+						return err
+					}
+					if !cfg.DeleteProfile(args[0]) {
+						return fmt.Errorf("profile %q not found", args[0])
+					}
+					if err := cfg.Save(dir); err != nil {
+						return fmt.Errorf("save config: %w", err)
 					}
 					ui.Success("Deleted profile: " + args[0])
 					return nil
@@ -740,6 +934,58 @@ func min(a, b int) int {
 		return a
 	}
 	return b
+}
+
+var importRe = regexp.MustCompile(`(?:import\s+(?:\w+\s+from\s+)?["']([^"']+)["']|require\(["']([^"']+)["']\)|import\(["']([^"']+)["']\))`)
+
+func scanImports(dir string) map[string]bool {
+	imported := map[string]bool{}
+	skipDirs := map[string]bool{"node_modules": true, ".git": true, ".svn": true, "dist": true, ".next": true, "build": true, ".cache": true, "coverage": true}
+	exts := map[string]bool{".js": true, ".ts": true, ".mjs": true, ".cjs": true, ".jsx": true, ".tsx": true, ".mts": true, ".cts": true}
+
+	filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+		if err != nil || info.IsDir() {
+			if info != nil && info.IsDir() && skipDirs[info.Name()] {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !exts[filepath.Ext(info.Name())] {
+			return nil
+		}
+		f, err := os.Open(path)
+		if err != nil {
+			return nil
+		}
+		defer f.Close()
+		scanner := bufio.NewScanner(f)
+		scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
+		for scanner.Scan() {
+			line := scanner.Text()
+			matches := importRe.FindStringSubmatch(line)
+			if matches == nil {
+				continue
+			}
+			pkg := matches[1]
+			if pkg == "" {
+				pkg = matches[2]
+			}
+			if pkg == "" {
+				pkg = matches[3]
+			}
+			if pkg == "" || strings.HasPrefix(pkg, ".") || strings.HasPrefix(pkg, "/") {
+				continue
+			}
+			parts := strings.SplitN(pkg, "/", 2)
+			if strings.HasPrefix(pkg, "@") && len(parts) > 1 {
+				imported[parts[0]+"/"+parts[1]] = true
+			} else {
+				imported[parts[0]] = true
+			}
+		}
+		return nil
+	})
+	return imported
 }
 
 func titleCase(s string) string {

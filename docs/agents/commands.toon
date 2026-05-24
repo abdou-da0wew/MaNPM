@@ -1,0 +1,184 @@
+---
+url: /agents/commands.toon
+description: >-
+  Detailed reference for all 13 MaNPM commands, flags, arguments, examples,
+  and alias map. Build flags, insert flags, and per-subcommand docs.
+---
+
+commands[13]{name,aliases,usage,description,flags,examples}:
+
+  - name: install
+    aliases[3]: i,in,inst
+    usage: manpm install [options]
+    description: >
+      Install all dependencies from lockfile. Default command when no
+      subcommand is given. Dispatched by dispatch() when args[0] is empty.
+    flags[9]{flag,short,type,default,description}:
+      --threads,-t,int,0,"Parallel workers (0 = platform-optimal via platform.OptimalWorkerCount())"
+      --lane-mode,-m,string,parallel,"Execution mode: parallel or sequential"
+      --priority-lock,-p,bool,false,"Prioritize lockfile over package.json"
+      --dry-run,,bool,false,"Simulate without downloading or extracting"
+      --skip-rebuild,,bool,false,"Skip native module rebuild step"
+      --skip-binlink,,bool,false,"Skip .bin executable linking"
+      --skip-scripts,,bool,false,"Skip lifecycle script execution"
+      --force-rebuild,,bool,false,"Force rebuild even if cached"
+      --retries,-r,int,3,"Maximum retries per package download"
+    examples[4]:
+      - manpm install
+      - manpm install --threads 8 --dry-run
+      - manpm install --skip-rebuild --skip-scripts
+      - manpm install --threads 4 --retries 5 --priority-lock
+
+  - name: add
+    aliases[1]: ad
+    usage: manpm add <package> [options]
+    description: >
+      Add a package and show impact preview. Delegates to npm install
+      internally for the actual installation. The --why flag consults
+      intel.Explain() instead.
+    flags[6]{flag,type,default,description}:
+      --smart,bool,false,"Enable smart dependency resolution"
+      --why,bool,false,"Show why the package would be needed"
+      --dry-run,string,"","Simulate add. Use =deep for deep analysis"
+      --peer-fix,bool,false,"Auto-fix peer dependency conflicts"
+      --dev,bool,false,"Install as a dev dependency"
+      --exact,bool,false,"Save exact version (no range prefix)"
+    examples[4]:
+      - manpm add express
+      - manpm add lodash --dev --exact
+      - manpm add react --why
+      - manpm add typescript --dry-run=deep
+
+  - name: explain
+    aliases[1]: ex
+    usage: manpm explain <package>
+    description: >
+      Show detailed information about an installed package. Reads
+      node_modules/<pkg>/package.json. Displays name, version, description,
+      homepage, license, dependencies, dev deps, install script status,
+      native addon detection.
+    args[1]: package (required)
+    examples[2]:
+      - manpm explain lodash
+      - manpm explain express
+
+  - name: audit
+    aliases[1]: au
+    usage: manpm audit
+    description: >
+      Scan lockfile for known vulnerabilities. Cross-references against
+      built-in advisory DB in pkg/intel. Covers lodash, minimist, node-fetch,
+      follow-redirects, glob-parent. Packages at fixed version are skipped.
+    examples[1]:
+      - manpm audit
+
+  - name: doctor
+    aliases[1]: doc
+    usage: manpm doctor
+    description: >
+      Analyze project health and produce score out of 100. Checks
+      node_modules existence, dependency graph cycles, graph size (>500
+      warns), empty directories. Deductions: error -25, warning -10,
+      suggestion -3.
+    examples[1]:
+      - manpm doctor
+
+  - name: map
+    aliases[1]: ls
+    usage: manpm map
+    description: >
+      Render dependency graph as ASCII tree grouped by topological level.
+      Each level shows packages and their immediate deps with tree-drawing
+      characters (+--, `--).
+    examples[1]:
+      - manpm map
+
+  - name: entropy
+    usage: manpm entropy
+    description: >
+      Measure project chaos metrics. Score 0-100 combining duplicate ratio,
+      depth, cycles. Formula: dupRatio*40 + depthFactor*30 + circularPenalty*30.
+    metrics[5]{field,description}:
+      Score,"0-100 chaos score"
+      Total packages,"Count of all packages in graph"
+      Unique libraries,Count of unique package names
+      Avg depth,"Weighted average dependency depth"
+      Circular deps,Number of detected cycles
+    examples[1]:
+      - manpm entropy
+
+  - name: prune
+    aliases[1]: pr
+    usage: manpm prune [options]
+    description: >
+      Scan source files for import/require statements, compare against
+      package.json deps, identify unused packages. Can auto-remove unused
+      top-level deps and update package.json.
+    flags[2]{flag,type,default,description}:
+      --safe,bool,false,"Keep packages with recent usage"
+      --dry-run,bool,false,"Only show what would be removed"
+    examples[2]:
+      - manpm prune
+      - manpm prune --dry-run
+
+  - name: run
+    aliases[1]: r
+    usage: manpm run <script>
+    description: >
+      Run a project script from package.json scripts section. Sets
+      npm_package_name, npm_package_version, npm_lifecycle_event env vars.
+      Executed via sh -c.
+    args[1]: script (required)
+    examples[2]:
+      - manpm run build
+      - manpm run test
+
+  - name: sandbox
+    aliases[1]: sb
+    usage: manpm sandbox <package>
+    description: >
+      Display sandbox information for a package. Informational only —
+      prints runtime restrictions (permissions, network, filesystem,
+      timeout, process spawning, memory limit).
+    args[1]: package (required)
+    examples[1]:
+      - manpm sandbox lodash
+
+  - name: compare
+    aliases[1]: cmp
+    usage: manpm compare <package1> <package2>
+    description: >
+      Compare two installed packages side-by-side. Reads both
+      package.json files. Compares version, license, description,
+      homepage, dependency counts.
+    args[2]: package1 (required), package2 (required)
+    examples[1]:
+      - manpm compare express koa
+
+  - name: sensei
+    aliases[1]: se
+    usage: manpm sensei
+    description: >
+      Full project architecture review. Lists root files, checks config
+      files (package.json, package-lock.json, .npmrc, .nvmrc), scans for
+      vulnerabilities, reports node_modules status.
+    examples[1]:
+      - manpm sensei
+
+  - name: profile
+    aliases[1]: pro
+    usage: manpm profile <subcommand> [name]
+    description: >
+      Manage installation profiles defined in manpm.config.toml. Supports
+      four subcommands. Profiles override base config settings (ui.mode,
+      safe_mode, version_strategy).
+    subcommands[4]{name,description,usage}:
+      list,List available profiles,manpm profile list
+      use,Switch to a named profile,manpm profile use <name>
+      create,Create a new profile,manpm profile create <name>
+      delete,Delete an existing profile,manpm profile delete <name>
+    examples[4]:
+      - manpm profile list
+      - manpm profile use strict
+      - manpm profile create custom
+      - manpm profile delete custom

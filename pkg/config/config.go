@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -407,4 +408,42 @@ func (c *Config) GetEffectiveInstallPolicy(projectName string) InstallPolicy {
 	}
 
 	return pol
+}
+
+func (c *Config) SetActiveProfile(name string) {
+	c.Profile = name
+}
+
+func (c *Config) AddProfile(p Profile) {
+	if c.profiles == nil {
+		c.profiles = map[string]Profile{}
+	}
+	c.profiles[p.Name] = p
+}
+
+func (c *Config) DeleteProfile(name string) bool {
+	if c.profiles == nil {
+		return false
+	}
+	_, ok := c.profiles[name]
+	if !ok {
+		return false
+	}
+	delete(c.profiles, name)
+	if c.Profile == name {
+		c.Profile = ""
+	}
+	return true
+}
+
+func (c *Config) ListProfiles() []string {
+	if c.profiles == nil {
+		return nil
+	}
+	names := make([]string, 0, len(c.profiles))
+	for name := range c.profiles {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
 }

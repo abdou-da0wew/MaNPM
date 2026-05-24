@@ -304,7 +304,8 @@ func TestDispatchProfileList(t *testing.T) {
 
 func TestDispatchProfileUse(t *testing.T) {
 	root := buildRouter()
-	err := dispatch(root, []string{"profile", "use", "strict"})
+	dispatch(root, []string{"profile", "create", "test-profile"})
+	err := dispatch(root, []string{"profile", "use", "test-profile"})
 	if err != nil {
 		t.Errorf("profile use failed: %v", err)
 	}

@@ -1,0 +1,241 @@
+---
+url: /agents/packages.toon
+description: >-
+  Exported types, functions, and interaction patterns for all 12 packages
+  under pkg/. Documents the public API surface of each package.
+---
+
+packages[12]{name,path,imports,exports,interactions}:
+
+  - name: binlink
+    path: pkg/binlink/binlink.go
+    depends_on[1]: stdlib (encoding/json, os, path/filepath)
+    types[2]:
+      - Linker{NodeModulesDir string, BinDir string}
+    functions[4]:
+      - NewLinker(nodeModulesDir string) *Linker
+      - (*Linker).LinkPackage(pkgPath string) error
+      - (*Linker).LinkAllPackages(ctx, pkgPaths []string) error
+      - (*Linker).ReadPackageBin(pkgPath string) (map[string]string, error)
+    description: >
+      Creates symlinks (or .cmd wrappers on Windows) for bin entries in
+      node_modules/.bin/. Handles scoped package name stripping. Uses
+      semaphore-buffered goroutines capped at 10 for LinkAll.
+
+  - name: buildmgr
+    path: pkg/buildmgr/buildmgr.go
+    depends_on[2]: stdlib, os/exec
+    types[2]:
+      - BuildManager{Dir string, NodesDir string, Verbose bool}
+      - NativePkgInfo{Name, Path, HasGypFile, HasPrebuild, HasNodeGyp, HasInstallScript bool}
+    functions[8]:
+      - NewBuildManager(dir string) *BuildManager
+      - (*BuildManager).DetectNativePackages(ctx) ([]NativePkgInfo, error)
+      - (*BuildManager).RebuildAll(ctx) error
+      - (*BuildManager).RebuildSequential(ctx) error
+      - (*BuildManager).RunInstallScripts(ctx) error
+      - (*BuildManager).RunPostinstallScripts(ctx) error
+      - (*BuildManager).RunProjectScript(ctx, scriptName string) error
+      - IsNativePackage(pkgDir string) bool
+      - IsHeavyweightBinaryPkg(name string) bool
+      - EnvForHeavyweightPkg(name string) []string
+    description: >
+      Detects native modules (binding.gyp, gypfile flag, prebuild dirs,
+      install scripts). Runs rebuild chain: prebuild-install -> node-gyp
+      -> npm rebuild -> build-from-source. Detects heavyweight packages
+      and skips binary downloads.
+
+  - name: cache
+    path: pkg/cache/cache.go
+    depends_on[1]: stdlib (encoding/json, sync, time)
+    types[2]:
+      - MetadataCache{Entries map[string]*CacheEntry}
+      - CacheEntry{Weight int64, Resolved string, Integrity string, CachedAt time.Time}
+    functions[3]:
+      - NewMetadataCache(cacheDir string) (*MetadataCache, error)
+      - (*MetadataCache).Get(name string) *CacheEntry
+      - (*MetadataCache).Set(name string, entry *CacheEntry)
+      - (*MetadataCache).Save() error
+    description: >
+      Thread-safe JSON metadata cache for package resolution data. Persists
+      to <cacheDir>/metadata.json. Used for weight tracking in graph's
+      SmallestLastHeuristic.
+
+  - name: config
+    path: pkg/config/
+    depends_on[1]: stdlib
+    files[2]:
+      - config.go: Config struct, profiles, overrides
+      - toml.go: Hand-rolled TOML parser (no BurntSushi/toml)
+    types[6]:
+      - Config{Core CoreConfig, Behavior BehaviorConfig, Install InstallPolicy, Profile string, UI UIConfig}
+      - CoreConfig{ParallelLimit int, AutoFixPeers bool, RetryCount int}
+      - BehaviorConfig{SafeMode bool, AutoPrune bool, ConfirmDestructive bool}
+      - InstallPolicy{PreferLockfile bool, VersionStrategy string, IgnoreScripts bool, SkipBinLink bool}
+      - UIConfig{Mode string}
+      - Profile{Name, UI, Strictness, VersionStrategy string, SafeMode *bool}
+    functions[11]:
+      - DefaultConfig() *Config
+      - LoadConfig(dir string) (*Config, error)
+      - (*Config).Save(dir string) error
+      - (*Config).GetProfile(name string) *Profile
+      - (*Config).ApplyProfile(name string) error
+      - (*Config).GetEffectiveInstallPolicy(projectName string) InstallPolicy
+      - (*Config).SetActiveProfile(name string)
+      - (*Config).AddProfile(p Profile)
+      - (*Config).DeleteProfile(name string) bool
+      - (*Config).ListProfiles() []string
+    description: >
+      Loads manpm.config.toml from project root. Hand-rolled TOML parser
+      in toml.go supports sections, key-value pairs, comments, quoting.
+      Profiles and per-project overrides merge on top of base config.
+
+  - name: extractor
+    path: pkg/extractor/extractor.go
+    depends_on[2]: stdlib (net/http, crypto/sha512, archive/tar, compress/gzip), platform
+    types[3]:
+      - PackageJob{Name, Path, TarballURL, Integrity string}
+      - ExtractResult{PackageName string, Error error}
+      - Extractor{Client *http.Client, BaseDir string, NumWorkers int, Concurrency int, FallbackDir string, MaxRetries int, OnProgress func}
+      - ExtractError{Op, Pkg string, Err error}
+    functions[6]:
+      - NewExtractor(baseDir string, numWorkers int) *Extractor
+      - (*Extractor).ExtractPackage(ctx, job PackageJob) error
+      - (*Extractor).ExtractLevel(ctx, jobs []PackageJob) []ExtractResult
+      - sanitizeTarPath(tarPath string) string
+      - stripPackagePrefix(path string) string
+      - verifyIntegrity(h hash.Hash, integrity string) error
+    description: >
+      Level-based parallel tarball extraction. Goroutine pool per level.
+      Streaming SHA512 via io.TeeReader. Path traversal prevention via
+      isPathSafe(). npm fallback on failure. Retries with exponential
+      backoff for network errors only.
+
+  - name: graph
+    path: pkg/graph/graph.go
+    depends_on[1]: stdlib (sync)
+    types[2]:
+      - PackageNode{Name, Version, Resolved, Integrity string, Dependencies map[string]string, Weight int64}
+      - DependencyGraph{Nodes map[string]*PackageNode, Levels [][]*PackageNode — mutex-protected}
+    functions[5]:
+      - NewDependencyGraph() *DependencyGraph
+      - (*DependencyGraph).AddNode(name, version, resolved, integrity string, deps map[string]string)
+      - (*DependencyGraph).TopologicalSort() error
+      - (*DependencyGraph).SmallestLastHeuristic(threshold int64) (lightweight [][]*PackageNode, heavyweight []*PackageNode)
+      - (*DependencyGraph).HasCycle() bool
+    description: >
+      Dependency graph with Kahn topological sort. Nodes stored by
+      node_modules/<name> key. Levels enable parallel extraction. Cycle
+      detection via DFS three-color algorithm. SLH splits packages into
+      light/heavy for scheduling.
+
+  - name: intel
+    path: pkg/intel/intel.go
+    depends_on[2]: graph, lockfile
+    types[5]:
+      - PackageInfo{Name, Version, Resolved, Integrity, Description, Homepage, License string, HasInstallScript, IsNative bool, Size int64, TransitiveCount int, InstalledBy string}
+      - AuditResult{PackageName, Severity, Title, CVE, FixAvailable string, ExploitProbability float64}
+      - DoctorResult{Issues []Issue, Score float64}
+      - Issue{Severity, Message, PackageName, Fix string}
+      - EntropyResult{Score float64, TotalPackages int, RedundantGroups []string, UniqueLibraries int, AvgDepth float64, CircularDeps int}
+    functions[8]:
+      - Explain(pkgDir, pkgName string) (string, error)
+      - Audit(lockfilePath string) ([]AuditResult, error)
+      - Doctor(projectDir string, dag *graph.DependencyGraph) (*DoctorResult, error)
+      - Map(dag *graph.DependencyGraph) string
+      - Entropy(dag *graph.DependencyGraph) *EntropyResult
+      - Sensei(projectDir string) (string, error)
+      - Compare(pkgDir, pkg1, pkg2 string) (string, error)
+      - SandboxInfo(pkgName string) string
+    description: >
+      Intelligence and analysis hub. Built-in advisory DB for audit.
+      Health scoring system for doctor. Entropy formula: dupRatio*40 +
+      depthFactor*30 + circularPenalty*30. Map renders ASCII tree.
+
+  - name: lockfile
+    path: pkg/lockfile/lockfile.go
+    depends_on[1]: stdlib (encoding/json)
+    types[2]:
+      - LockfileV2{LockfileVersion int, Packages map[string]*PackageDef}
+      - PackageDef{Version, Resolved, Integrity string, Dependencies map[string]string, Dev, Optional bool}
+    functions[3]:
+      - Parse(path string) (*LockfileV2, error)
+      - Validate(path string) error
+      - FindLockfile(dir string) (string, error)
+    description: >
+      Parses package-lock.json v2/v3. Validates version and non-empty
+      packages map. FindLockfile searches project root.
+
+  - name: platform
+    path: pkg/platform/platform.go
+    depends_on[1]: stdlib (runtime, os)
+    types[2]:
+      - OS: string enum (windows, linux, darwin, android)
+      - Arch: string enum (arm, arm64, amd64, 386)
+    functions[9]:
+      - DetectOS() OS
+      - DetectArch() Arch
+      - IsARM() bool
+      - IsAndroid() bool
+      - OptimalWorkerCount() int
+      - DefaultConcurrencyLimit() int
+      - SupportsSymlinks() bool
+      - TempDir() string
+    description: >
+      OS/arch detection with Android-specific heuristics (/system/build.prop).
+      Memory-aware worker capping via /proc/meminfo on Android. Temp dir
+      defaults to /data/local/tmp/manpm on Android, overridable via
+      MANPM_TMPDIR.
+
+  - name: preflight
+    path: pkg/preflight/preflight.go
+    depends_on[2]: lockfile, platform
+    types[1]:
+      - Result{HasPackageJSON, HasLockfile bool, LockfileVersion int, LockfilePath string, NodeInPATH, NpmInPATH, CanWriteNodeMods bool, NodeVersion, NpmVersion string, OS platform.OS, Arch platform.Arch, ConcurrencyLimit int}
+    functions[2]:
+      - Run(dir string) (*Result, error)
+      - PrintSummary(res *Result)
+    description: >
+      Pre-install validation. Checks package.json existence, lockfile
+      validity, node/npm in PATH, filesystem write permissions. Called
+      at start of install pipeline.
+
+  - name: ui
+    path: pkg/ui/
+    depends_on[1]: stdlib (fmt, os)
+    files[2]:
+      - ui.go: ANSI terminal helpers
+      - progress.go: Progress bar widget
+    types[1]:
+      - Progress{total int, complete int, msg string, done bool}
+    functions[12]:
+      - Error(msg string)
+      - Errorf(format string, args ...interface{})
+      - Warning(msg string)
+      - Success(msg string)
+      - Info(msg string)
+      - Header(title string)
+      - Subheader(title string)
+      - Label(k, v string)
+      - BoldText(s string) string
+      - Colorize(color, s string) string
+      - Dim(s string) string
+      - Separator()
+      - NewProgress(total int) *Progress
+      - (*Progress).Start()
+      - (*Progress).Inc(name string)
+      - (*Progress).Update(msg string)
+      - (*Progress).Done(msg string)
+    constants:
+      Reset: \033[0m
+      Bold: \033[1m
+      Red: \033[31m
+      Green: \033[32m
+      Yellow: \033[33m
+      Cyan: \033[36m
+      Orange: \033[38;5;208m
+      Gray: \033[90m
+    description: >
+      ANSI terminal output with colored icons (✖, ⚠, ✓, ℹ). Progress bar
+      with [###··] style, updates on stderr. Header/Subheader with cyan
+      and orange styling. Label helper for aligned key: value output.

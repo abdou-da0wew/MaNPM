@@ -1,0 +1,138 @@
+---
+url: /agents/index.toon
+description: >-
+  Complete agent instruction doc for MaNPM project. AI agents read this to
+  understand architecture, build pipeline, commands, testing quirks, palette,
+  and implementation patterns.
+---
+
+manpm:
+  description: >
+    The blazing-fast Go orchestrator for npm packages. Parallel tarball
+    extraction, SHA512 verification, native module rebuild, .bin linking.
+  language: Go 1.26+
+  dependencies: stdlib only (NO external deps)
+  binary: ~2.4MB stripped ARM64 at /tmp/manpm
+  module: manpm
+  entrypoint: cmd/manpm/main.go
+  router: buildRouter() / dispatch() — custom, no cobra/urfave
+  config: manpm.config.toml — hand-rolled TOML parser
+
+architecture:
+  overview: >
+    Install pipeline: lockfile parse -> dependency DAG (Kahn sort) ->
+    level-based parallel extraction -> native rebuild chain -> .bin symlinking
+  packages[12]:
+    - binlink: .bin symlink management
+    - buildmgr: Native package detection and rebuild chain
+    - cache: JSON metadata cache for package resolutions
+    - config: TOML configuration loader
+    - extractor: Parallel tarball download, SHA512 verification, extraction
+    - graph: Dependency graph, topological sort, cycle detection
+    - intel: Project intelligence (explain, audit, doctor, map, entropy, sensei, compare, sandbox)
+    - lockfile: package-lock.json v2/v3 parser
+    - platform: OS/arch detection, memory-aware worker tuning
+    - preflight: Pre-install validation
+    - ui: ANSI terminal output
+
+dataflow:
+  - step: 1
+    action: lockfile.Parse()
+    output: "[]PackageDef"
+  - step: 2
+    action: graph.DependencyGraph.AddNode() + TopologicalSort()
+    detail: Kahn's algorithm, light/heavy levels via SmallestLastHeuristic()
+  - step: 3
+    action: extractor.ExtractLevel()
+    detail: >
+      goroutine pool per level, HTTP GET + SHA512 via io.TeeReader,
+      gzip + tar extract, integrity check, npm fallback on failure
+  - step: 4
+    action: buildmgr.DetectNativePackages() + rebuild chain
+    strategies[4]: prebuild-install, node-gyp rebuild, npm rebuild, build-from-source
+  - step: 5
+    action: binlink.LinkAllPackages()
+
+commands[13]{name,description,usage}:
+  install,"Install all dependencies from lockfile",manpm install [options]
+  add,"Add a package and show impact",manpm add <package> [options]
+  explain,"Show why a package is installed",manpm explain <package>
+  audit,"Run vulnerability analysis",manpm audit
+  doctor,"Analyze project health",manpm doctor
+  map,"Show ASCII dependency graph",manpm map
+  entropy,"Show project chaos metrics",manpm entropy
+  prune,"Show and remove unused packages",manpm prune [options]
+  run,"Run a project script",manpm run <script>
+  sandbox,"Show sandbox info for a package",manpm sandbox <package>
+  compare,"Compare two installed packages",manpm compare <pkg1> <pkg2>
+  sensei,"Full project architecture review",manpm sensei
+  profile,"Manage installation profiles",manpm profile <subcommand> [name]
+
+aliases[14]{short,full}:
+  i,install
+  in,install
+  inst,install
+  r,run
+  ad,add
+  ex,explain
+  au,audit
+  doc,doctor
+  pr,prune
+  sb,sandbox
+  cmp,compare
+  pro,profile
+  se,sensei
+  ls,map
+
+build:
+  note: Must copy to /tmp first (fuseblk RLock incompatibility on /storagesdcard)
+  steps[4]:
+    - cp -a /storagesdcard/ManPM/* /tmp/manpm-src/
+    - cd /tmp/manpm-src && go test ./...
+    - cd /tmp/manpm-src && go vet ./...
+    - cd /tmp/manpm-src && go build -ldflags="-s -w" -o /tmp/manpm ./cmd/manpm/
+  sync_back: cp -a /tmp/manpm-src/* /storagesdcard/ManPM/
+
+testing_quirks[4]:
+  - "pkg/intel: Explain/Audit/Compare/Sensei work against temp dirs, no live npm needed"
+  - "pkg/buildmgr: creates mock node_modules/ dirs with binding.gyp files"
+  - "cmd/manpm: tests call dispatch() directly — --help handling is in main(), not dispatch()"
+  - "Tests produce ANSI output to stdout (expected, not a failure)"
+
+palette:
+  description: Dark ANSI theme — 9 colors defined in pallet.json
+  primary_colors[4]{name,hex,usage}:
+    Orange,#E35A00,"Headers, logo accents, error icons"
+    Golden,#FCA710,"Logo highlights, glowing accents"
+    Cyan,#6CD0E5,"Info, subheaders, progress bars, gopher body"
+    Coral,#E24F44,"Diagram arrows, warning accents"
+
+implementation_patterns:
+  zero_external_deps: >
+    All packages use only Go stdlib. TOML parser is hand-written in
+    pkg/config/toml.go. CLI router uses flag.FlagSet — no cobra/urfave.
+  kahn_topological_sort: >
+    Packages assigned to execution levels. Same-level packages have no
+    interdependencies and extract concurrently. Cycle detected = ErrCycleDetected.
+  level_based_extraction: >
+    goroutine pool per topological level. Each goroutine: HTTP GET tarball,
+    stream through SHA512 hasher (io.TeeReader), decompress gzip, extract tar.
+    Paths sanitized against Zip Slip.
+  retry_with_backoff: >
+    Failed downloads retry up to MaxRetries with exponential backoff
+    (attempt^2 seconds). Network errors retryable. Integrity failures not retryable.
+  npm_fallback: >
+    If all extraction attempts fail, falls back to npm install <pkg>@<version>
+    for that specific package.
+  platform_detection: >
+    Detects OS/arch. Linux checks /system/build.prop for Android. Android reads
+    /proc/meminfo for memory-aware worker capping. Symlinks disabled on Windows
+    unless MANPM_FORCE_SYMLINKS set.
+  rebuild_chain[4]:
+    - prebuild-install (prebuilt binary download)
+    - node-gyp rebuild (system node-gyp)
+    - npm rebuild --foreground-scripts
+    - npm rebuild --build-from-source
+  heavyweight_detection: >
+    Known heavy packages (canvas, sharp, cypress, etc.) detected and env
+    configured to skip unnecessary binary downloads during rebuild.
