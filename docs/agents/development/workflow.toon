@@ -1,28 +1,25 @@
 ---
-url: /agents/workflow.toon
+url: /agents/development/workflow.toon
 description: >-
-  Common MaNPM development workflows: building, testing, adding a command,
+  Generic development workflows: building, testing, adding a command,
   modifying the pipeline, adding a package, and pushing changes.
 ---
 
 workflows[6]{name,steps,notes}:
 
   - name: build
-    steps[4]:
-      - "cp -a /storagesdcard/ManPM/* /tmp/manpm-src/"
-      - "cd /tmp/manpm-src && go build -ldflags='-s -w' -o /tmp/manpm ./cmd/manpm/"
-      - "cp -a /tmp/manpm-src/* /storagesdcard/ManPM/"
+    steps[2]:
+      - "go build -ldflags='-s -w' -o manpm ./cmd/manpm/"
+      - "./manpm --help"
     notes: >
-      Build MUST be done from /tmp because /storagesdcard uses fuseblk which
-      has RLock incompatibility with Go. Use -ldflags=-s -w to strip debug
-      info and minimize binary size (~2.4MB stripped ARM64).
+      Use -ldflags=-s -w to strip debug info and minimize binary size.
+      The binary is output as ./manpm in the current directory.
 
   - name: test
-    steps[4]:
-      - "cp -a /storagesdcard/ManPM/* /tmp/manpm-src/"
-      - "cd /tmp/manpm-src && go test ./..."
-      - "cd /tmp/manpm-src && go vet ./..."
-      - "cp -a /tmp/manpm-src/* /storagesdcard/ManPM/"
+    steps[3]:
+      - "go test ./..."
+      - "go vet ./..."
+      - "go test -v ./pkg/<name>/  # specific package"
     notes[4]:
       - "pkg/intel tests: Explain/Audit/Compare/Sensei work against scratch temp dirs, not live project — no live npm needed"
       - "pkg/buildmgr tests: create mock node_modules/ trees with binding.gyp and package.json fixtures"
@@ -51,7 +48,7 @@ workflows[6]{name,steps,notes}:
         (distance <= 2) via findSuggestions().
 
   - name: modify-pipeline
-    description: Modify the install pipeline (add/modify a stage)
+    description: Modify the install pipeline (add or modify a stage)
     pipeline_stages[6]:
       - preflight.Run(dir) — validate project
       - lockfile.Parse() — parse package-lock.json
@@ -60,7 +57,7 @@ workflows[6]{name,steps,notes}:
       - buildmgr.RebuildAll/RebuildSequential — native module rebuild
       - binlink.LinkAllPackages — .bin symlinks
     integration_points[5]:
-      - "runInstall() in commands.go: the orchestrator. Adds stages here."
+      - "runInstall() in commands.go: the orchestrator. Add stages here."
       - "Config struct in commands.go: add new field, parse in flag.FlagSet, thread through runInstall()"
       - "New extractor stage: add method to Extractor struct in pkg/extractor/extractor.go"
       - "New analysis stage: add function to pkg/intel/intel.go, call in runInstall()"
@@ -82,13 +79,11 @@ workflows[6]{name,steps,notes}:
       testing: "Use t.TempDir() for isolated test directories. Table-driven tests preferred."
 
   - name: push
-    steps[5]:
-      - "cp -a /tmp/manpm-src/* /storagesdcard/ManPM/  # if built from /tmp"
-      - "cd /storagesdcard/ManPM"
+    steps[4]:
       - "git add -A"
       - "git commit -m '<conventional-commit message>'"
-      - "git push origin main"
-    notes[3]:
-      - "SSH only — key at ~/.ssh/id_rsa"
-      - "Remote: git@github.com:abdou-da0wew/MaNPM.git"
+      - "go vet ./...  # ensure no issues before push"
+      - "git push"
+    notes[2]:
+      - "Use conventional commits format: feat:, fix:, refactor:, docs:, test:, chore:"
       - "Run go vet ./... before committing"

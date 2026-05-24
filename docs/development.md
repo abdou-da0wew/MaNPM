@@ -90,16 +90,18 @@ pkg/ui/           Terminal output and color helpers
 
 ## Color palette
 
-UI colors are defined in `pallet.json` and used in `pkg/ui/ui.go` as ANSI escape constants:
+UI colors are defined as ANSI escape constants in `pkg/ui/ui.go`:
 
-| Constant | Hex | Usage |
-|----------|-----|-------|
-| Orange | `#E35A00` | Headers, logo accents |
-| Cyan | `#6CD0E5` | Info, subheaders |
-| Green | `#00FF00` | Success |
-| Yellow | `#FFFF00` | Warnings |
-| Red | `#FF0000` | Errors |
-| Gray | `#555555` | Labels, dim text |
+| Constant | Code | Usage |
+|----------|------|-------|
+| Orange | `\033[38;5;208m` | Headers, logo accents |
+| Cyan | `\033[36m` | Info, subheaders |
+| Green | `\033[32m` | Success |
+| Yellow | `\033[33m` | Warnings |
+| Red | `\033[31m` | Errors |
+| Gray | `\033[90m` | Labels, dim text |
+| Magenta | `\033[35m` | Accents |
+| White | `\033[97m` | Header titles |
 
 ## Release
 

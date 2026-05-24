@@ -1,0 +1,106 @@
+---
+url: /agents/usage/configuration.toon
+description: >-
+  Complete reference for manpm.config.toml — all sections, fields, types,
+  defaults, and a complete example.
+---
+
+config_file: manpm.config.toml
+
+location: Project root directory
+
+sections:
+
+  - name: "[core]"
+    description: Core parallelism and retry settings
+    fields[3]{name,type,default,description}:
+      parallel_limit,int,8,"Maximum parallel extraction workers"
+      auto_fix_peers,bool,true,"Automatically fix peer dependency conflicts"
+      retry_count,int,3,"Number of retry attempts for failed downloads"
+
+  - name: "[behavior]"
+    description: General behavior settings
+    fields[3]{name,type,default,description}:
+      safe_mode,bool,false,"Enable safe mode (more conservative operations)"
+      auto_prune,bool,false,"Automatically prune unused packages after install"
+      confirm_destructive,bool,true,"Ask confirmation before destructive operations"
+
+  - name: "[install_policy]"
+    description: Installation policy defaults
+    fields[4]{name,type,default,description}:
+      prefer_lockfile,bool,true,"Use lockfile as source of truth over package.json"
+      version_strategy,string,stable,"Version resolution strategy (stable|latest|strict)"
+      ignore_scripts,bool,false,"Skip all lifecycle scripts during install"
+      skip_binlink,bool,false,"Skip .bin executable linking"
+
+  - name: "[ui]"
+    description: User interface settings
+    fields[1]{name,type,default,description}:
+      mode,string,developer,"UI verbosity (developer|minimal|silent)"
+
+  - name: "[profile]"
+    description: Active profile selection
+    fields[1]{name,type,description}:
+      active,string,"Name of the active profile"
+
+  - name: "[profile.<name>]"
+    description: Define a named profile
+    fields[4]{name,type,description}:
+      ui,string,"UI mode override for this profile"
+      strictness,string,"Strictness level (safe|normal)"
+      version_strategy,string,"Version strategy override"
+      safe_mode,bool,"Safe mode override"
+
+  - name: "[override.<project>]"
+    description: Per-project install policy overrides
+    fields[4]{name,type,description}:
+      prefer_lockfile,bool,"Override lockfile preference"
+      version_strategy,string,"Override version strategy"
+      ignore_scripts,bool,"Override script execution"
+      skip_binlink,bool,"Override bin linking"
+
+complete_example: >
+  [core]
+  parallel_limit = 8
+  auto_fix_peers = true
+  retry_count = 3
+
+  [behavior]
+  safe_mode = false
+  auto_prune = false
+  confirm_destructive = true
+
+  [install_policy]
+  prefer_lockfile = true
+  version_strategy = "stable"
+  ignore_scripts = false
+  skip_binlink = false
+
+  [ui]
+  mode = "developer"
+
+  [profile]
+  active = "strict-profile"
+
+  [profile.strict-profile]
+  ui = "developer"
+  strictness = "safe"
+  version_strategy = "strict"
+  safe_mode = true
+
+  [override.my-project]
+  prefer_lockfile = true
+  version_strategy = "latest"
+  ignore_scripts = false
+  skip_binlink = false
+
+notes:
+  parser: >
+    TOML is parsed by a hand-rolled parser in pkg/config/toml.go.
+    Supports sections, key-value pairs, comments (#), and quoted strings.
+  profiles: >
+    Profiles are applied on top of the base config. Fields set in
+    a profile override the corresponding base values.
+  overrides: >
+    Per-project overrides replace the entire InstallPolicy for that
+    project name. Only the install_policy keys are supported.

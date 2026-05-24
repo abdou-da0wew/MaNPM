@@ -1,0 +1,93 @@
+---
+url: /agents/development/architecture.toon
+description: >-
+  Package architecture map, install data flow, and key design decisions.
+---
+
+package_map[12]{name,path,role}:
+  binlink,pkg/binlink/,.bin symlink management
+  buildmgr,pkg/buildmgr/,Native package detection and rebuild
+  cache,pkg/cache/,JSON metadata cache for package resolutions
+  config,pkg/config/,TOML configuration loader
+  extractor,pkg/extractor/,Parallel tarball download and extraction
+  graph,pkg/graph/,Dependency DAG, topological sort, cycle detection
+  intel,pkg/intel/,Project intelligence and analysis
+  lockfile,pkg/lockfile/,package-lock.json v2/v3 parser
+  platform,pkg/platform/,OS/arch detection and worker tuning
+  preflight,pkg/preflight/,Pre-install validation
+  ui,pkg/ui/,ANSI terminal output and progress bars
+
+install_data_flow:
+  - stage: Preflight
+    package: preflight
+    function: preflight.Run(dir)
+    input: project directory
+    output: "*Result — validates package.json, lockfile, node/npm in PATH, permissions"
+  - stage: Lockfile Parse
+    package: lockfile
+    function: lockfile.Parse(path)
+    input: package-lock.json path
+    output: "*LockfileV2 — packages map with version, resolved URL, integrity, dependencies"
+  - stage: Graph Build
+    package: graph
+    functions[2]:
+      - graph.NewDependencyGraph().AddNode(name, version, resolved, integrity, deps)
+      - graph.TopologicalSort()
+    output: "Levels [][]*PackageNode — Kahn-sorted with cycle detection"
+  - stage: Extraction
+    package: extractor
+    function: extractor.ExtractLevel(ctx, jobs)
+    input: "[]PackageJob per topological level"
+    output: "[]ExtractResult — parallel HTTP GET + SHA512 + gzip/tar + integrity check"
+  - stage: Rebuild
+    package: buildmgr
+    functions[2]:
+      - buildmgr.RebuildAll(ctx) — parallel native rebuild
+      - buildmgr.RebuildSequential(ctx) — sequential native rebuild
+    strategies[4]:
+      - prebuild-install (npx, prebuilt binary)
+      - node-gyp rebuild (system node-gyp)
+      - npm rebuild --foreground-scripts
+      - npm rebuild --build-from-source
+  - stage: Binlink
+    package: binlink
+    function: binlink.LinkAllPackages(ctx, pkgPaths)
+    output: Creates .bin symlinks (or .cmd wrappers on Windows)
+
+design_decisions:
+  zero_external_dependencies: >
+    The entire project uses only Go standard library. The TOML parser
+    is hand-rolled (pkg/config/toml.go). CLI dispatching uses flag.FlagSet
+    with custom buildRouter()/dispatch(). No cobra, urfave/cli, or
+    BurntSushi/toml.
+  kahn_topological_sort: >
+    Dependency graph uses Kahn's algorithm for topological sort. Packages
+    are grouped into levels where same-level packages have no interdependencies
+    and can be extracted concurrently. Cycles are detected via in-degree
+    counting: if fewer nodes visited than total, ErrCycleDetected is returned.
+  level_based_extraction: >
+    Each topological level is extracted by a goroutine pool. Workers:
+    HTTP GET tarball URL -> stream through SHA512 hasher via io.TeeReader
+    -> decompress gzip -> extract tar entries. Paths are validated against
+    Zip Slip via isPathSafe(). Integrity verified after extraction.
+  retry_with_exponential_backoff: >
+    Failed downloads retry up to MaxRetries. Backoff = attempt^2 seconds.
+    Only network-related errors are retried (timeout, connection, reset,
+    refused, EOF, TLS, HTTP 5xx). Integrity mismatch errors are NOT retried.
+  npm_fallback: >
+    When all extraction attempts fail for a package, the fallbackInstall()
+    method runs npm install <pkg>@<version> with --no-audit --ignore-scripts
+    --no-package-lock --no-save.
+  platform_detection: >
+    DetectOS() checks runtime.GOOS and probes /system/build.prop for Android.
+    OptimalWorkerCount() factors CPU count and approx RAM for ARM. On Windows,
+    symlinks are disabled unless MANPM_FORCE_SYMLINKS is set.
+  heavyweight_package_handling: >
+    IsHeavyweightBinaryPkg() matches known large packages (canvas, sharp,
+    cypress, puppeteer, playwright, esbuild, swc, etc).
+    EnvForHeavyweightPkg() returns env vars to skip binary downloads
+    (e.g., CYPRESS_INSTALL_BINARY=0, PUPPETEER_SKIP_DOWNLOAD=true).
+  dispatch_routing: >
+    Commands are dispatched by name match. Alias resolution via aliases map.
+    Typo suggestions via levenshtein distance (threshold <= 2) and prefix
+    matching. Subcommands use dispatchSub() recursive dispatch.

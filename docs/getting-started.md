@@ -32,7 +32,7 @@ This produces a statically linked binary at `./manpm` (~2.4 MB stripped).
 manpm --help
 ```
 
-You should see the help screen listing all 12 commands.
+You should see the help screen listing all 13 commands.
 
 ## Your first run
 
@@ -75,6 +75,7 @@ manpm audit          # Check for known vulnerabilities
 manpm map            # Show the dependency graph as a tree
 manpm entropy        # Measure project chaos metrics
 manpm sensei         # Full project review
+manpm run build      # Run a project script from package.json
 ```
 
 ## Configuration

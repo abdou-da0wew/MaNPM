@@ -1,0 +1,54 @@
+---
+url: /agents/usage/getting-started.toon
+description: >-
+  Quickstart guide: prerequisites, building from source, first run, and
+  typical user workflow.
+---
+
+prerequisites:
+  - Go 1.26 or later
+  - Node.js 18 or later
+  - npm 9 or later
+
+build_from_source:
+  steps[4]:
+    - git clone <repository-url>
+    - cd MaNPM
+    - go build -ldflags="-s -w" -o manpm ./cmd/manpm/
+    - ./manpm --help
+  notes: >
+    The -ldflags="-s -w" strips debug information and reduces binary size.
+    The resulting binary is placed in the current directory as ./manpm.
+
+first_run:
+  steps[4]:
+    - manpm doctor
+    - manpm map
+    - manpm entropy
+    - manpm install
+  description: >
+    Run doctor to check project health before installing. Use map to
+    preview the dependency graph. Entropy shows project chaos metrics.
+    Install downloads and extracts all packages.
+
+typical_workflow:
+  steps[6]:
+    - "manpm doctor — check project health"
+    - "manpm install — install all dependencies"
+    - "manpm map — visualize dependency graph"
+    - "manpm run build — run project build script"
+    - "manpm sensei — full architecture review"
+    - "manpm prune — remove unused packages"
+
+examples:
+  quick_install: >
+    cd my-node-project
+    manpm install
+  dry_run: >
+    manpm install --dry-run
+  custom_threads: >
+    manpm install --threads 8 --retries 5
+  add_package: >
+    manpm add lodash
+  explain_package: >
+    manpm explain express

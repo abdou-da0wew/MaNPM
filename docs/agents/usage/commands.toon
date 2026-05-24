@@ -1,8 +1,8 @@
 ---
-url: /agents/commands.toon
+url: /agents/usage/commands.toon
 description: >-
   Detailed reference for all 13 MaNPM commands, flags, arguments, examples,
-  and alias map. Build flags, insert flags, and per-subcommand docs.
+  and alias map.
 ---
 
 commands[13]{name,aliases,usage,description,flags,examples}:
@@ -14,8 +14,8 @@ commands[13]{name,aliases,usage,description,flags,examples}:
       Install all dependencies from lockfile. Default command when no
       subcommand is given. Dispatched by dispatch() when args[0] is empty.
     flags[9]{flag,short,type,default,description}:
-      --threads,-t,int,0,"Parallel workers (0 = platform-optimal via platform.OptimalWorkerCount())"
-      --lane-mode,-m,string,parallel,"Execution mode: parallel or sequential"
+      --threads,-t,int,0,"Parallel workers (0 = platform-optimal)"
+      --lane-mode,-m,string,parallel,"Execution mode: parallel|sequential"
       --priority-lock,-p,bool,false,"Prioritize lockfile over package.json"
       --dry-run,,bool,false,"Simulate without downloading or extracting"
       --skip-rebuild,,bool,false,"Skip native module rebuild step"
@@ -23,19 +23,17 @@ commands[13]{name,aliases,usage,description,flags,examples}:
       --skip-scripts,,bool,false,"Skip lifecycle script execution"
       --force-rebuild,,bool,false,"Force rebuild even if cached"
       --retries,-r,int,3,"Maximum retries per package download"
-    examples[4]:
+    examples[3]:
       - manpm install
-      - manpm install --threads 8 --dry-run
-      - manpm install --skip-rebuild --skip-scripts
-      - manpm install --threads 4 --retries 5 --priority-lock
+      - manpm install --dry-run
+      - manpm install --threads 8 --lane-mode sequential
 
   - name: add
     aliases[1]: ad
     usage: manpm add <package> [options]
     description: >
       Add a package and show impact preview. Delegates to npm install
-      internally for the actual installation. The --why flag consults
-      intel.Explain() instead.
+      for actual installation. The --why flag calls intel.Explain() instead.
     flags[6]{flag,type,default,description}:
       --smart,bool,false,"Enable smart dependency resolution"
       --why,bool,false,"Show why the package would be needed"
@@ -55,8 +53,7 @@ commands[13]{name,aliases,usage,description,flags,examples}:
     description: >
       Show detailed information about an installed package. Reads
       node_modules/<pkg>/package.json. Displays name, version, description,
-      homepage, license, dependencies, dev deps, install script status,
-      native addon detection.
+      homepage, license, dependencies, dev deps, install script status.
     args[1]: package (required)
     examples[2]:
       - manpm explain lodash
@@ -88,8 +85,7 @@ commands[13]{name,aliases,usage,description,flags,examples}:
     usage: manpm map
     description: >
       Render dependency graph as ASCII tree grouped by topological level.
-      Each level shows packages and their immediate deps with tree-drawing
-      characters (+--, `--).
+      Each level shows packages with tree-drawing characters (+--, `--).
     examples[1]:
       - manpm map
 
@@ -112,8 +108,9 @@ commands[13]{name,aliases,usage,description,flags,examples}:
     usage: manpm prune [options]
     description: >
       Scan source files for import/require statements, compare against
-      package.json deps, identify unused packages. Can auto-remove unused
-      top-level deps and update package.json.
+      package.json deps, identify unused packages. Walks the dependency
+      graph to find transitive packages no longer needed. Can auto-remove
+      unused top-level deps and update package.json.
     flags[2]{flag,type,default,description}:
       --safe,bool,false,"Keep packages with recent usage"
       --dry-run,bool,false,"Only show what would be removed"
@@ -182,3 +179,19 @@ commands[13]{name,aliases,usage,description,flags,examples}:
       - manpm profile use strict
       - manpm profile create custom
       - manpm profile delete custom
+
+aliases[14]{short,command}:
+  i,install
+  in,install
+  inst,install
+  r,run
+  ad,add
+  ex,explain
+  au,audit
+  doc,doctor
+  pr,prune
+  sb,sandbox
+  cmp,compare
+  pro,profile
+  se,sensei
+  ls,map

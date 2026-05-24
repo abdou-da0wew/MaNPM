@@ -197,7 +197,7 @@ manpm entropy
 
 ### prune
 
-Show and remove unused packages.
+Show and remove unused packages by scanning source files for import/require statements and tracing transitive dependencies through the dependency graph.
 
 ```
 manpm prune [options]
@@ -207,6 +207,26 @@ manpm prune [options]
 |------|------|---------|-------------|
 | `--safe` | bool | false | Keep packages with recent usage |
 | `--dry-run` | bool | false | Only show what would be removed |
+
+---
+
+### run
+
+Run a project script from `package.json`.
+
+```
+manpm run <script>
+```
+
+Looks up the named script in `package.json` under `scripts` and executes it via the shell. Supports the alias `manpm r <script>`.
+
+Examples:
+
+```
+manpm run build
+manpm run test
+manpm r start
+```
 
 ---
 

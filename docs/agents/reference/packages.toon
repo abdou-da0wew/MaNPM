@@ -1,16 +1,15 @@
 ---
-url: /agents/packages.toon
+url: /agents/reference/packages.toon
 description: >-
-  Exported types, functions, and interaction patterns for all 12 packages
-  under pkg/. Documents the public API surface of each package.
+  Exported types, functions, and descriptions for all 12 packages under pkg/.
 ---
 
-packages[12]{name,path,imports,exports,interactions}:
+packages[12]{name,path,imports,types,functions,description}:
 
   - name: binlink
     path: pkg/binlink/binlink.go
-    depends_on[1]: stdlib (encoding/json, os, path/filepath)
-    types[2]:
+    imports[1]: stdlib (encoding/json, os, path/filepath, runtime, strings, sync)
+    types[1]:
       - Linker{NodeModulesDir string, BinDir string}
     functions[4]:
       - NewLinker(nodeModulesDir string) *Linker
@@ -19,16 +18,17 @@ packages[12]{name,path,imports,exports,interactions}:
       - (*Linker).ReadPackageBin(pkgPath string) (map[string]string, error)
     description: >
       Creates symlinks (or .cmd wrappers on Windows) for bin entries in
-      node_modules/.bin/. Handles scoped package name stripping. Uses
-      semaphore-buffered goroutines capped at 10 for LinkAll.
+      node_modules/.bin/. Handles scoped package name stripping via stripScope().
+      Uses semaphore-buffered goroutines (cap 10) for LinkAllPackages.
+      Skips existing links with same target to avoid unnecessary I/O.
 
   - name: buildmgr
     path: pkg/buildmgr/buildmgr.go
-    depends_on[2]: stdlib, os/exec
+    imports[2]: stdlib, os/exec
     types[2]:
       - BuildManager{Dir string, NodesDir string, Verbose bool}
       - NativePkgInfo{Name, Path, HasGypFile, HasPrebuild, HasNodeGyp, HasInstallScript bool}
-    functions[8]:
+    functions[10]:
       - NewBuildManager(dir string) *BuildManager
       - (*BuildManager).DetectNativePackages(ctx) ([]NativePkgInfo, error)
       - (*BuildManager).RebuildAll(ctx) error
@@ -40,41 +40,44 @@ packages[12]{name,path,imports,exports,interactions}:
       - IsHeavyweightBinaryPkg(name string) bool
       - EnvForHeavyweightPkg(name string) []string
     description: >
-      Detects native modules (binding.gyp, gypfile flag, prebuild dirs,
-      install scripts). Runs rebuild chain: prebuild-install -> node-gyp
-      -> npm rebuild -> build-from-source. Detects heavyweight packages
-      and skips binary downloads.
+      Detects native modules by inspecting binding.gyp, gypfile flag,
+      prebuilds dir, node_modules/node-gyp, and install scripts.
+      Rebuild chain: prebuild-install (npx) -> node-gyp rebuild ->
+      npm rebuild --foreground-scripts -> npm rebuild --build-from-source.
+      Detects heavyweight packages (canvas, sharp, cypress, etc.) and
+      sets environment variables to skip unnecessary binary downloads.
+      RunProjectScript runs a script from package.json via sh -c.
 
   - name: cache
     path: pkg/cache/cache.go
-    depends_on[1]: stdlib (encoding/json, sync, time)
+    imports[1]: stdlib (encoding/json, os, path/filepath, sync, time)
     types[2]:
-      - MetadataCache{Entries map[string]*CacheEntry}
+      - MetadataCache{Entries map[string]*CacheEntry, mutex-protected}
       - CacheEntry{Weight int64, Resolved string, Integrity string, CachedAt time.Time}
-    functions[3]:
+    functions[4]:
       - NewMetadataCache(cacheDir string) (*MetadataCache, error)
       - (*MetadataCache).Get(name string) *CacheEntry
       - (*MetadataCache).Set(name string, entry *CacheEntry)
       - (*MetadataCache).Save() error
     description: >
-      Thread-safe JSON metadata cache for package resolution data. Persists
-      to <cacheDir>/metadata.json. Used for weight tracking in graph's
-      SmallestLastHeuristic.
+      Thread-safe JSON metadata cache persisted to <cacheDir>/metadata.json.
+      Used by graph's SmallestLastHeuristic for weight-based scheduling of
+      package extraction. Loads existing cache on creation.
 
   - name: config
     path: pkg/config/
-    depends_on[1]: stdlib
+    imports[1]: stdlib (fmt, os, path/filepath, sort, strings, strconv)
     files[2]:
-      - config.go: Config struct, profiles, overrides
+      - config.go: Config struct, profiles, overrides, TOML encoding
       - toml.go: Hand-rolled TOML parser (no BurntSushi/toml)
     types[6]:
-      - Config{Core CoreConfig, Behavior BehaviorConfig, Install InstallPolicy, Profile string, UI UIConfig}
+      - Config{Core, Behavior, Install, Profile string, UI, profiles map, projectOverrides map}
       - CoreConfig{ParallelLimit int, AutoFixPeers bool, RetryCount int}
       - BehaviorConfig{SafeMode bool, AutoPrune bool, ConfirmDestructive bool}
       - InstallPolicy{PreferLockfile bool, VersionStrategy string, IgnoreScripts bool, SkipBinLink bool}
       - UIConfig{Mode string}
       - Profile{Name, UI, Strictness, VersionStrategy string, SafeMode *bool}
-    functions[11]:
+    functions[10]:
       - DefaultConfig() *Config
       - LoadConfig(dir string) (*Config, error)
       - (*Config).Save(dir string) error
@@ -86,54 +89,60 @@ packages[12]{name,path,imports,exports,interactions}:
       - (*Config).DeleteProfile(name string) bool
       - (*Config).ListProfiles() []string
     description: >
-      Loads manpm.config.toml from project root. Hand-rolled TOML parser
-      in toml.go supports sections, key-value pairs, comments, quoting.
-      Profiles and per-project overrides merge on top of base config.
+      Loads manpm.config.toml from project root. The hand-rolled TOML
+      parser supports sections, key-value pairs, # comments, and quoted
+      strings. Profiles and per-project overrides merge on top of base
+      config. Supports profile sections (profile.<name>) for named
+      presets and override.<project> for per-project install policies.
+      Default config returned when no config file exists.
 
   - name: extractor
     path: pkg/extractor/extractor.go
-    depends_on[2]: stdlib (net/http, crypto/sha512, archive/tar, compress/gzip), platform
-    types[3]:
+    imports[4]: stdlib (archive/tar, compress/gzip, crypto/sha512, net/http, encoding/base64, hash, io, os, os/exec, path/filepath, strings, sync, time), platform
+    types[4]:
       - PackageJob{Name, Path, TarballURL, Integrity string}
       - ExtractResult{PackageName string, Error error}
       - Extractor{Client *http.Client, BaseDir string, NumWorkers int, Concurrency int, FallbackDir string, MaxRetries int, OnProgress func}
-      - ExtractError{Op, Pkg string, Err error}
-    functions[6]:
+      - ExtractError{Op, Pkg string, Err error} — implements Unwrap()
+    functions[5]:
       - NewExtractor(baseDir string, numWorkers int) *Extractor
       - (*Extractor).ExtractPackage(ctx, job PackageJob) error
       - (*Extractor).ExtractLevel(ctx, jobs []PackageJob) []ExtractResult
       - sanitizeTarPath(tarPath string) string
       - stripPackagePrefix(path string) string
-      - verifyIntegrity(h hash.Hash, integrity string) error
     description: >
-      Level-based parallel tarball extraction. Goroutine pool per level.
-      Streaming SHA512 via io.TeeReader. Path traversal prevention via
-      isPathSafe(). npm fallback on failure. Retries with exponential
-      backoff for network errors only.
+      Level-based parallel tarball extraction with goroutine pool.
+      Streaming SHA512 verification via io.TeeReader during download.
+      Path traversal prevention via isPathSafe(). npm fallback via
+      fallbackInstall() when extraction fails. Retries with exponential
+      backoff (attempt^2 seconds) for network errors only. Integrity
+      mismatch errors are fatal (no retry).
 
   - name: graph
     path: pkg/graph/graph.go
-    depends_on[1]: stdlib (sync)
+    imports[1]: stdlib (errors, path/filepath, sort, sync)
     types[2]:
       - PackageNode{Name, Version, Resolved, Integrity string, Dependencies map[string]string, Weight int64}
-      - DependencyGraph{Nodes map[string]*PackageNode, Levels [][]*PackageNode — mutex-protected}
+      - DependencyGraph{Nodes map[string]*PackageNode, Levels [][]*PackageNode, mutex-protected}
     functions[5]:
       - NewDependencyGraph() *DependencyGraph
       - (*DependencyGraph).AddNode(name, version, resolved, integrity string, deps map[string]string)
       - (*DependencyGraph).TopologicalSort() error
-      - (*DependencyGraph).SmallestLastHeuristic(threshold int64) (lightweight [][]*PackageNode, heavyweight []*PackageNode)
+      - (*DependencyGraph).SmallestLastHeuristic(threshold int64) (lightweight, heavyweight)
       - (*DependencyGraph).HasCycle() bool
     description: >
-      Dependency graph with Kahn topological sort. Nodes stored by
-      node_modules/<name> key. Levels enable parallel extraction. Cycle
-      detection via DFS three-color algorithm. SLH splits packages into
-      light/heavy for scheduling.
+      Dependency graph using Kahn's algorithm for topological sort.
+      Nodes stored by node_modules/<name> key. Levels group packages
+      with no interdependencies for parallel extraction. Cycle detection
+      via DFS three-color algorithm (HasCycle). ErrCycleDetected returned
+      when visited count < total nodes. SmallestLastHeuristic splits
+      packages into light/heavy based on weight threshold for scheduling.
 
   - name: intel
     path: pkg/intel/intel.go
-    depends_on[2]: graph, lockfile
+    imports[2]: graph, lockfile
     types[5]:
-      - PackageInfo{Name, Version, Resolved, Integrity, Description, Homepage, License string, HasInstallScript, IsNative bool, Size int64, TransitiveCount int, InstalledBy string}
+      - PackageInfo{Name, Version, Resolved, Integrity, Description, Homepage, License string, Dependencies, DevDeps map, HasInstallScript, IsNative bool, Size int64, TransitiveCount int, InstalledBy string}
       - AuditResult{PackageName, Severity, Title, CVE, FixAvailable string, ExploitProbability float64}
       - DoctorResult{Issues []Issue, Score float64}
       - Issue{Severity, Message, PackageName, Fix string}
@@ -148,13 +157,18 @@ packages[12]{name,path,imports,exports,interactions}:
       - Compare(pkgDir, pkg1, pkg2 string) (string, error)
       - SandboxInfo(pkgName string) string
     description: >
-      Intelligence and analysis hub. Built-in advisory DB for audit.
-      Health scoring system for doctor. Entropy formula: dupRatio*40 +
-      depthFactor*30 + circularPenalty*30. Map renders ASCII tree.
+      Intelligence and analysis hub. Explain reads node_modules/<pkg>/package.json
+      and prints details. Audit cross-references lockfile against built-in
+      advisory DB (lodash, minimist, node-fetch, follow-redirects, glob-parent).
+      Doctor scores project health (error -25, warning -10, suggestion -3).
+      Entropy formula: dupRatio*40 + depthFactor*30 + circularPenalty*30.
+      Map renders ASCII tree grouped by topological level. Sensei does
+      full project structure review. Compare shows side-by-side diff of
+      two packages. SandboxInfo returns informational sandbox template.
 
   - name: lockfile
     path: pkg/lockfile/lockfile.go
-    depends_on[1]: stdlib (encoding/json)
+    imports[1]: stdlib (encoding/json, fmt, os, path/filepath)
     types[2]:
       - LockfileV2{LockfileVersion int, Packages map[string]*PackageDef}
       - PackageDef{Version, Resolved, Integrity string, Dependencies map[string]string, Dev, Optional bool}
@@ -163,16 +177,17 @@ packages[12]{name,path,imports,exports,interactions}:
       - Validate(path string) error
       - FindLockfile(dir string) (string, error)
     description: >
-      Parses package-lock.json v2/v3. Validates version and non-empty
-      packages map. FindLockfile searches project root.
+      Parses package-lock.json v2 and v3. Validates version range (2-3)
+      and non-empty packages map. FindLockfile searches for
+      package-lock.json in the given directory.
 
   - name: platform
     path: pkg/platform/platform.go
-    depends_on[1]: stdlib (runtime, os)
+    imports[1]: stdlib (fmt, os, runtime, strings)
     types[2]:
       - OS: string enum (windows, linux, darwin, android)
       - Arch: string enum (arm, arm64, amd64, 386)
-    functions[9]:
+    functions[7]:
       - DetectOS() OS
       - DetectArch() Arch
       - IsARM() bool
@@ -180,16 +195,16 @@ packages[12]{name,path,imports,exports,interactions}:
       - OptimalWorkerCount() int
       - DefaultConcurrencyLimit() int
       - SupportsSymlinks() bool
-      - TempDir() string
     description: >
-      OS/arch detection with Android-specific heuristics (/system/build.prop).
-      Memory-aware worker capping via /proc/meminfo on Android. Temp dir
-      defaults to /data/local/tmp/manpm on Android, overridable via
-      MANPM_TMPDIR.
+      OS/arch detection via runtime.GOOS with Android-specific heuristics
+      (probes /system/build.prop). OptimalWorkerCount() factors CPU count
+      and approximate RAM (via /proc/meminfo on Android). DefaultConcurrencyLimit()
+      wraps OptimalWorkerCount(). Symlinks disabled on Windows unless
+      MANPM_FORCE_SYMLINKS is set.
 
   - name: preflight
     path: pkg/preflight/preflight.go
-    depends_on[2]: lockfile, platform
+    imports[2]: lockfile, platform
     types[1]:
       - Result{HasPackageJSON, HasLockfile bool, LockfileVersion int, LockfilePath string, NodeInPATH, NpmInPATH, CanWriteNodeMods bool, NodeVersion, NpmVersion string, OS platform.OS, Arch platform.Arch, ConcurrencyLimit int}
     functions[2]:
@@ -197,18 +212,20 @@ packages[12]{name,path,imports,exports,interactions}:
       - PrintSummary(res *Result)
     description: >
       Pre-install validation. Checks package.json existence, lockfile
-      validity, node/npm in PATH, filesystem write permissions. Called
-      at start of install pipeline.
+      validity and parseability, node and npm availability in PATH,
+      and filesystem write permissions for node_modules. Called at the
+      start of the install pipeline. Returns detailed Result struct
+      used by subsequent pipeline stages.
 
   - name: ui
     path: pkg/ui/
-    depends_on[1]: stdlib (fmt, os)
+    imports[1]: stdlib (fmt, os, strings)
     files[2]:
       - ui.go: ANSI terminal helpers
       - progress.go: Progress bar widget
     types[1]:
       - Progress{total int, complete int, msg string, done bool}
-    functions[12]:
+    functions[15]:
       - Error(msg string)
       - Errorf(format string, args ...interface{})
       - Warning(msg string)
@@ -226,16 +243,18 @@ packages[12]{name,path,imports,exports,interactions}:
       - (*Progress).Inc(name string)
       - (*Progress).Update(msg string)
       - (*Progress).Done(msg string)
-    constants:
-      Reset: \033[0m
-      Bold: \033[1m
-      Red: \033[31m
-      Green: \033[32m
-      Yellow: \033[33m
-      Cyan: \033[36m
-      Orange: \033[38;5;208m
-      Gray: \033[90m
+    constants[7]:
+      - Reset: \033[0m
+      - Bold: \033[1m
+      - Red: \033[31m
+      - Green: \033[32m
+      - Yellow: \033[33m
+      - Cyan: \033[36m
+      - Orange: \033[38;5;208m
+      - Gray: \033[90m
     description: >
-      ANSI terminal output with colored icons (✖, ⚠, ✓, ℹ). Progress bar
-      with [###··] style, updates on stderr. Header/Subheader with cyan
-      and orange styling. Label helper for aligned key: value output.
+      ANSI terminal output with colored icons (✖, ⚠, ✓, ℹ). Header
+      renders a framed title in orange. Subheader uses cyan. Progress
+      bar renders [###··] style with counter on stderr. Label helper
+      produces aligned key: value output. Error/Errorf writes to stderr.
+      Success, Info write to stdout. All functions use ANSI escape codes.

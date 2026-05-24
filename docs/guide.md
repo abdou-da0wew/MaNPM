@@ -14,7 +14,7 @@ Use `manpm doctor` to run preflight checks independently.
 
 Every entry in `package-lock.json` is added to a dependency graph. Each package records its version, resolved URL, integrity hash, and declared dependencies. A Kahn topological sort assigns every package to a level where all packages at the same level have no dependencies on each other and can be processed concurrently.
 
-If a cycle is detected, `manpm doctor` reports it and the install stops.
+If a cycle is detected, a warning is shown and the install continues by processing all packages in a single pass. Cycles do not block the install.
 
 ### 3. Download and extraction
 
@@ -37,9 +37,13 @@ Heavyweight packages (canvas, sharp, cypress, puppeteer, electron, playwright, e
 
 Each package's `bin` field (from `package.json`) is read and used to create symlinks in `node_modules/.bin/`. On POSIX systems, symlinks are created. On Windows, `.cmd` wrapper scripts are generated. Scoped packages (`@scope/name`) have the scope stripped from the link name.
 
-### 6. Post-install analysis
+### 6. Lifecycle scripts
 
-After install completes, `manpm sensei` runs a full project review: lists project files, checks config presense, scans for vulnerabilities, and reports `node_modules` status. `manpm entropy` calculates chaos metrics: duplicate package ratio, average dependency depth, circular dependency count.
+After binary linking, MaNPM runs `postinstall` scripts for each installed package. Scripts are executed sequentially. If a script fails, a warning is printed but the install continues. Using `--skip-scripts` or setting `ignore_scripts = true` in the config skips this stage entirely.
+
+### Post-install analysis
+
+After install completes, you can run `manpm sensei` for a full project review: listing project files, checking config presence, scanning for vulnerabilities, and reporting `node_modules` status. `manpm entropy` calculates chaos metrics: duplicate package ratio, average dependency depth, circular dependency count.
 
 ## Using profiles
 
@@ -72,6 +76,22 @@ manpm compare express koa
 ```
 
 Reads both packages' `package.json` files and displays a side-by-side comparison of version, license, description, homepage, and dependency counts.
+
+## Running project scripts
+
+```
+manpm run <script>
+```
+
+MaNPM can execute any script defined in `package.json` under the `scripts` field. The `run` command looks up the script name and executes it via the shell. It supports the alias `manpm r <script>`.
+
+Examples:
+
+```
+manpm run build
+manpm run test
+manpm r start
+```
 
 ## Analyzing project health
 

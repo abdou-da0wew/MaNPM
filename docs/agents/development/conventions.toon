@@ -1,0 +1,77 @@
+---
+url: /agents/development/conventions.toon
+description: >-
+  Coding standards, testing practices, naming conventions, and architecture
+  patterns used throughout the MaNPM codebase.
+---
+
+zero_external_dependencies:
+  rule: "All packages use only Go standard library — zero external imports"
+  exceptions[2]:
+    - "os/exec — used for calling npm, node, npx, sh"
+    - "runtime — used for GOOS/GOARCH detection"
+  rationale: >
+    Keeps the binary self-contained (~2.4MB stripped), eliminates
+    supply-chain risk, and simplifies cross-compilation.
+
+file_organization:
+  rule: "One implementation file per package"
+  exceptions[2]:
+    - pkg/config/: config.go (structs + logic) + toml.go (parser)
+    - pkg/ui/: ui.go (terminal helpers) + progress.go (progress bar)
+  test_files: "Co-located _test.go in same package directory"
+
+context_usage:
+  rule: "context.Context is the first parameter of any blocking function"
+  examples[3]:
+    - "ExtractLevel(ctx context.Context, jobs []PackageJob) []ExtractResult"
+    - "RebuildAll(ctx context.Context) error"
+    - "LinkAllPackages(ctx context.Context, pkgPaths []string) error"
+
+error_handling:
+  rule: "Error types wrapping other errors must implement Unwrap()"
+  example: >
+    type ExtractError struct {
+      Op  string
+      Pkg string
+      Err error
+    }
+    func (e *ExtractError) Unwrap() error { return e.Err }
+  pattern: "Use fmt.Errorf('...: %w', err) for error wrapping in functions"
+
+testing:
+  pattern: "Table-driven tests with t.TempDir() for isolation"
+  rules[6]:
+    - "Use t.TempDir() for creating temporary project directories"
+    - "Use t.Helper() on reusable setup functions"
+    - "Prefer table-driven tests for multiple test cases"
+    - "Test both success and error paths"
+    - "Use co-located _test.go files (not external test packages)"
+    - "ANSI output to stdout is expected during tests"
+
+naming:
+  exports: "PascalCase — Config, PackageNode, ExtractResult"
+  unexported: "camelCase — buildRouter, sanitizeTarPath, findNodeGyp"
+  constructors: "New<Type>() — NewLinker, NewBuildManager, NewExtractor"
+  interface_names: "Not used — no interfaces in the codebase (simple package design)"
+  error_types: "Suffix with Error — ExtractError"
+
+concurrency:
+  primitives[3]:
+    - "sync.WaitGroup — goroutine coordination"
+    - "buffered channels — work distribution and result collection"
+    - "sync.RWMutex — shared state protection"
+  patterns[2]:
+    - "Semaphore via buffered channel: sem := make(chan struct{}, limit)"
+    - "Worker pool: fixed goroutines reading from job channel"
+
+config:
+  parser: "Hand-rolled TOML parser in pkg/config/toml.go"
+  file_name: "manpm.config.toml in project root"
+  loading: "LoadConfig(dir) — returns defaults if file missing"
+
+dispatch:
+  router: "buildRouter() assembles Command tree. dispatch() resolves by name."
+  aliases: "aliases map — short form to canonical name mapping"
+  suggestions: "levenshtein distance <= 2 or prefix match for unknown commands"
+  subcommands: "dispatchSub() for nested commands (profile)"

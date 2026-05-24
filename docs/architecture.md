@@ -42,7 +42,10 @@ package-lock.json
   rebuild chain: prebuild-install -> node-gyp rebuild -> npm rebuild -> build from source
        |
        v
-  binlink.LinkAllPackages()  --> symlink .bin entries
+   binlink.LinkAllPackages()  --> symlink .bin entries
+       |
+       v
+   buildmgr.RunPostinstallScripts()  --> lifecycle scripts
 ```
 
 ## Design decisions
@@ -53,7 +56,7 @@ All packages use only the Go standard library. The TOML parser in `pkg/config/` 
 
 ### Kahn topological sort
 
-Packages are assigned to execution levels using Kahn's algorithm. Every package at the same level can be extracted concurrently because no dependencies exist between them. If a cycle exists (package A depends on B, B depends on A), the sort fails with `ErrCycleDetected`.
+Packages are assigned to execution levels using Kahn's algorithm. Every package at the same level can be extracted concurrently because no dependencies exist between them. If a cycle exists (package A depends on B, B depends on A), a warning is emitted and all packages are processed in a single pass. Cycles do not block the install.
 
 ### Level-based parallel extraction
 
