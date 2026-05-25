@@ -1,10 +1,10 @@
 ---
 url: /agents/reference/packages.toon
 description: >-
-  Exported types, functions, and descriptions for all 12 packages under pkg/.
+  Exported types, functions, and descriptions for all 13 packages under pkg/.
 ---
 
-packages[12]{name,path,imports,types,functions,description}:
+packages[13]{name,path,imports,types,functions,description}:
 
   - name: binlink
     path: pkg/binlink/binlink.go
@@ -180,6 +180,26 @@ packages[12]{name,path,imports,types,functions,description}:
       Parses package-lock.json v2 and v3. Validates version range (2-3)
       and non-empty packages map. FindLockfile searches for
       package-lock.json in the given directory.
+
+  - name: pkgjson
+    path: pkg/pkgjson/pkgjson.go
+    imports[1]: stdlib (encoding/json, os, os/exec, path/filepath, sort, strings)
+    types[3]:
+      - PackageJSON{Name, Version string, Dependencies, DevDependencies, PeerDependencies map[string]string}
+      - Mismatch{Name string, Versions, Groups []string}
+      - UpdateResult{Name, Current, Wanted, Latest string}
+    functions[6]:
+      - ReadPackageJSON(dir string) (*PackageJSON, error)
+      - WritePackageJSON(dir string, pkg *PackageJSON) error
+      - LockVersions(pkg *PackageJSON, names []string, majorOnly bool) int
+      - DetectMismatches(pkg *PackageJSON) []Mismatch
+      - FixMismatches(pkg *PackageJSON, strategy string) int
+      - CheckOutdated(dir string, names []string) ([]UpdateResult, error)
+    description: >
+      Package.json dependency management. Lock strips ^ and ~ prefixes.
+      DetectMismatches finds version conflicts across dep groups.
+      FixMismatches resolves by picking highest version.
+      CheckOutdated delegates to npm outdated --json.
 
   - name: platform
     path: pkg/platform/platform.go

@@ -31,6 +31,7 @@ manpm add <package> [options]
 manpm doctor
 manpm sensei
 manpm audit
+manpm pkgjson lock
 ```
 
 See [Commands](docs/commands.md) for the full reference.

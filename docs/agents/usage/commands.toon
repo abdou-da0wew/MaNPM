@@ -1,11 +1,11 @@
 ---
 url: /agents/usage/commands.toon
 description: >-
-  Detailed reference for all 13 MaNPM commands, flags, arguments, examples,
+  Detailed reference for all 14 MaNPM commands, flags, arguments, examples,
   and alias map.
 ---
 
-commands[13]{name,aliases,usage,description,flags,examples}:
+commands[14]{name,aliases,usage,description,flags,examples}:
 
   - name: install
     aliases[3]: i,in,inst
@@ -180,7 +180,22 @@ commands[13]{name,aliases,usage,description,flags,examples}:
       - manpm profile create custom
       - manpm profile delete custom
 
-aliases[14]{short,command}:
+  - name: pkgjson
+    aliases[1]: pj
+    usage: manpm pkgjson <subcommand> [options]
+    description: >
+      Manage package.json dependencies — lock versions, fix mismatches,
+      check for updates from npm registry.
+    subcommands[3]{name,description,usage,flags,examples}:
+      lock,"Lock versions by removing ^ and ~ prefixes","manpm pkgjson lock [--major] [<packages...>]",[--major bool false "Only lock minor/patch"],["manpm pkgjson lock","manpm pkgjson lock --major"]
+      fix,"Fix version mismatches across dep groups","manpm pkgjson fix [--dry-run] [--strategy=highest]",[--dry-run bool false "Show only",--strategy string highest "Strategy"],["manpm pkgjson fix","manpm pkgjson fix --dry-run"]
+      update,"Check outdated packages from npm","manpm pkgjson update [--dry-run] [<packages...>]",[--dry-run bool false "Show only"],["manpm pkgjson update --dry-run"]
+    examples[3]:
+      - manpm pkgjson lock
+      - manpm pkgjson fix --dry-run
+      - manpm pkgjson update
+
+aliases[15]{short,command}:
   i,install
   in,install
   inst,install
@@ -195,3 +210,4 @@ aliases[14]{short,command}:
   pro,profile
   se,sensei
   ls,map
+  pj,pkgjson

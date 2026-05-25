@@ -21,6 +21,7 @@ import (
 	"manpm/pkg/graph"
 	"manpm/pkg/intel"
 	"manpm/pkg/lockfile"
+	"manpm/pkg/pkgjson"
 	"manpm/pkg/preflight"
 	"manpm/pkg/ui"
 )
@@ -803,6 +804,116 @@ func buildRouter() Command {
 		},
 	}
 
+	var pkgjsonCmd Command
+	pkgjsonCmd = Command{
+		Name:        "pkgjson",
+		Description: "Manage package.json dependencies",
+		Usage:       "manpm pkgjson <subcommand> [options]",
+		Subcommands: []Command{
+			{
+				Name:        "lock",
+				Description: "Lock dependency versions by removing ^ and ~ prefixes",
+				Usage:       "manpm pkgjson lock [--major] [<packages...>]",
+				Run: func(args []string) error {
+					fs := flag.NewFlagSet("pkgjson-lock", flag.ContinueOnError)
+					majorOnly := fs.Bool("major", false, "Only lock minor/patch (keep caret)")
+					if err := fs.Parse(args); err != nil {
+						return err
+					}
+					dir, _ := os.Getwd()
+					pkg, err := pkgjson.ReadPackageJSON(dir)
+					if err != nil {
+						return err
+					}
+					names := fs.Args()
+					locked := pkgjson.LockVersions(pkg, names, *majorOnly)
+					if locked == 0 {
+						ui.Info("No versions to lock")
+						return nil
+					}
+					if err := pkgjson.WritePackageJSON(dir, pkg); err != nil {
+						return fmt.Errorf("write package.json: %w", err)
+					}
+					ui.Success(fmt.Sprintf("Locked %d version(s)", locked))
+					return nil
+				},
+			},
+			{
+				Name:        "update",
+				Description: "Check for outdated packages from npm registry",
+				Usage:       "manpm pkgjson update [--dry-run] [<packages...>]",
+				Run: func(args []string) error {
+					fs := flag.NewFlagSet("pkgjson-update", flag.ContinueOnError)
+					dryRun := fs.Bool("dry-run", false, "Only show what would be updated")
+					if err := fs.Parse(args); err != nil {
+						return err
+					}
+					dir, _ := os.Getwd()
+					names := fs.Args()
+					results, err := pkgjson.CheckOutdated(dir, names)
+					if err != nil {
+						return fmt.Errorf("check outdated: %w", err)
+					}
+					if len(results) == 0 {
+						ui.Success("All packages are up to date")
+						return nil
+					}
+					ui.Label("Outdated", fmt.Sprintf("%d package(s)", len(results)))
+					for _, r := range results {
+						if *dryRun {
+							ui.Info(fmt.Sprintf("  %s: %s → %s (latest: %s)", r.Name, r.Current, r.Wanted, r.Latest))
+						} else {
+							ui.Info(fmt.Sprintf("  %s: %s → %s", r.Name, r.Current, r.Wanted))
+						}
+					}
+					return nil
+				},
+			},
+			{
+				Name:        "fix",
+				Description: "Fix version mismatches across dependency groups",
+				Usage:       "manpm pkgjson fix [--dry-run] [--strategy=highest]",
+				Run: func(args []string) error {
+					fs := flag.NewFlagSet("pkgjson-fix", flag.ContinueOnError)
+					dryRun := fs.Bool("dry-run", false, "Only show mismatches without fixing")
+					strategy := fs.String("strategy", "highest", "Resolution strategy: highest")
+					if err := fs.Parse(args); err != nil {
+						return err
+					}
+					dir, _ := os.Getwd()
+					pkg, err := pkgjson.ReadPackageJSON(dir)
+					if err != nil {
+						return err
+					}
+					mismatches := pkgjson.DetectMismatches(pkg)
+					if len(mismatches) == 0 {
+						ui.Success("No version mismatches found")
+						return nil
+					}
+					ui.Label("Mismatches", fmt.Sprintf("%d package(s)", len(mismatches)))
+					for _, m := range mismatches {
+						ui.Info(fmt.Sprintf("  %s: %s (%s)", m.Name, strings.Join(m.Versions, ", "), strings.Join(m.Groups, ", ")))
+					}
+					if *dryRun {
+						return nil
+					}
+					fixed := pkgjson.FixMismatches(pkg, *strategy)
+					if err := pkgjson.WritePackageJSON(dir, pkg); err != nil {
+						return fmt.Errorf("write package.json: %w", err)
+					}
+					ui.Success(fmt.Sprintf("Fixed %d mismatch(es)", fixed))
+					return nil
+				},
+			},
+		},
+		Run: func(args []string) error {
+			if len(args) == 0 {
+				return fmt.Errorf("usage: manpm pkgjson <subcommand> [options]\n\nSubcommands: lock, update, fix")
+			}
+			return dispatchSub(pkgjsonCmd, args)
+		},
+	}
+
 	root.Subcommands = []Command{
 		installCmd,
 		addCmd,
@@ -817,6 +928,7 @@ func buildRouter() Command {
 		compareCmd,
 		senseiCmd,
 		profileCmd,
+		pkgjsonCmd,
 	}
 
 	return root
@@ -836,6 +948,7 @@ var aliases = map[string]string{
 	"cmp":   "compare",
 	"pro":   "profile",
 	"se":    "sensei",
+	"pj":    "pkgjson",
 	"ls":    "map",
 }
 
@@ -886,7 +999,11 @@ func dispatchSub(cmd Command, args []string) error {
 		}
 	}
 
-	return fmt.Errorf("unknown subcommand: %s %s\n\nSubcommands: list, use, create, delete", cmd.Name, name)
+	var names []string
+	for _, sub := range cmd.Subcommands {
+		names = append(names, sub.Name)
+	}
+	return fmt.Errorf("unknown subcommand: %s %s\n\nSubcommands: %s", cmd.Name, name, strings.Join(names, ", "))
 }
 
 func findSuggestions(root Command, input string) []string {

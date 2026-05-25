@@ -20,3 +20,18 @@ vendor/
 .idea/
 .vscode/
 *.sublime-*
+
+# Backup files
+*.bak
+
+# Node
+node_modules/
+package-lock.json
+
+# Project-specific untracked
+pallet.json
+pla.md
+tools/
+cmd/manpm/node_modules/
+cmd/manpm/manpm.config.toml
+cmd/manpm/package.json

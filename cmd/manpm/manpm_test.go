@@ -12,7 +12,7 @@ func TestBuildRouter(t *testing.T) {
 	if root.Name != "manpm" {
 		t.Errorf("expected manpm, got %q", root.Name)
 	}
-	if len(root.Subcommands) != 13 {
+	if len(root.Subcommands) != 14 {
 		t.Errorf("expected 13 commands, got %d", len(root.Subcommands))
 	}
 }
@@ -27,7 +27,7 @@ func TestRouterCommands(t *testing.T) {
 		names[cmd.Name] = true
 	}
 
-	expected := []string{"install", "add", "explain", "audit", "doctor", "map", "entropy", "prune", "run", "sandbox", "compare", "sensei", "profile"}
+	expected := []string{"install", "add", "explain", "audit", "doctor", "map", "entropy", "prune", "run", "sandbox", "compare", "sensei", "profile", "pkgjson"}
 	for _, name := range expected {
 		if !names[name] {
 			t.Errorf("missing command: %s", name)
@@ -595,4 +595,106 @@ func TestTitleCaseEdgeCases(t *testing.T) {
 	if titleCase("already_capital") != "Already_Capital" {
 		t.Errorf("expected 'Already_Capital', got %q", titleCase("already_capital"))
 	}
+}
+
+func TestDispatchPkgjsonLock(t *testing.T) {
+	withInstallDir(t, func() {
+		root := buildRouter()
+		err := dispatch(root, []string{"pkgjson", "lock"})
+		if err != nil {
+			t.Fatalf("pkgjson lock failed: %v", err)
+		}
+	})
+}
+
+func TestDispatchPkgjsonLockMajor(t *testing.T) {
+	withInstallDir(t, func() {
+		root := buildRouter()
+		err := dispatch(root, []string{"pkgjson", "lock", "--major"})
+		if err != nil {
+			t.Fatalf("pkgjson lock --major failed: %v", err)
+		}
+	})
+}
+
+func TestDispatchPkgjsonLockSpecific(t *testing.T) {
+	withInstallDir(t, func() {
+		root := buildRouter()
+		err := dispatch(root, []string{"pkgjson", "lock", "left-pad"})
+		if err != nil {
+			t.Fatalf("pkgjson lock left-pad failed: %v", err)
+		}
+	})
+}
+
+func TestDispatchPkgjsonNoSubcommand(t *testing.T) {
+	root := buildRouter()
+	err := dispatch(root, []string{"pkgjson"})
+	if err == nil {
+		t.Fatal("expected error for pkgjson with no subcommand")
+	}
+}
+
+func TestDispatchPkgjsonUnknownSubcommand(t *testing.T) {
+	root := buildRouter()
+	err := dispatch(root, []string{"pkgjson", "bogus"})
+	if err == nil {
+		t.Fatal("expected error for unknown subcommand")
+	}
+}
+
+func TestDispatchPkgjsonFix(t *testing.T) {
+	withInstallDir(t, func() {
+		dir, _ := os.Getwd()
+		os.WriteFile(filepath.Join(dir, "package.json"), []byte(`{
+			"name":"test",
+			"dependencies":{"express":"^4.0.0"},
+			"devDependencies":{"express":"^5.0.0"}
+		}`), 0644)
+		os.WriteFile(filepath.Join(dir, "package-lock.json"), []byte(`{"name":"test","lockfileVersion":3,"packages":{}}`), 0644)
+
+		root := buildRouter()
+		err := dispatch(root, []string{"pkgjson", "fix"})
+		if err != nil {
+			t.Fatalf("pkgjson fix failed: %v", err)
+		}
+	})
+}
+
+func TestDispatchPkgjsonFixDryRun(t *testing.T) {
+	withInstallDir(t, func() {
+		dir, _ := os.Getwd()
+		os.WriteFile(filepath.Join(dir, "package.json"), []byte(`{
+			"name":"test",
+			"dependencies":{"express":"^4.0.0"},
+			"devDependencies":{"express":"^5.0.0"}
+		}`), 0644)
+		os.WriteFile(filepath.Join(dir, "package-lock.json"), []byte(`{"name":"test","lockfileVersion":3,"packages":{}}`), 0644)
+
+		root := buildRouter()
+		err := dispatch(root, []string{"pkgjson", "fix", "--dry-run"})
+		if err != nil {
+			t.Fatalf("pkgjson fix --dry-run failed: %v", err)
+		}
+	})
+}
+
+func TestDispatchPkgjsonUpdateDryRun(t *testing.T) {
+	withInstallDir(t, func() {
+		root := buildRouter()
+		err := dispatch(root, []string{"pkgjson", "update", "--dry-run"})
+		if err != nil {
+			t.Logf("pkgjson update --dry-run (may fail if no npm): %v", err)
+		}
+	})
+}
+
+func TestDispatchPkgjsonAlias(t *testing.T) {
+	withInstallDir(t, func() {
+		root := buildRouter()
+		err := dispatch(root, []string{"pj", "lock"})
+		if err != nil {
+			t.Fatalf("pj alias failed: %v", err)
+		}
+	})
 }

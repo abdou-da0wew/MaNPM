@@ -54,7 +54,7 @@ dataflow:
   - step: 6
     action: binlink.LinkAllPackages()
 
-commands[13]{name,description,usage}:
+commands[14]{name,description,usage}:
   install,"Install all dependencies from lockfile",manpm install [options]
   add,"Add a package and show impact",manpm add <package> [options]
   explain,"Show why a package is installed",manpm explain <package>
@@ -68,8 +68,9 @@ commands[13]{name,description,usage}:
   compare,"Compare two installed packages",manpm compare <pkg1> <pkg2>
   sensei,"Full project architecture review",manpm sensei
   profile,"Manage installation profiles",manpm profile <subcommand> [name]
+  pkgjson,"Manage package.json dependencies",manpm pkgjson <subcommand> [options]
 
-aliases[14]{short,full}:
+aliases[15]{short,full}:
   i,install
   in,install
   inst,install
@@ -84,6 +85,7 @@ aliases[14]{short,full}:
   pro,profile
   se,sensei
   ls,map
+  pj,pkgjson
 
 palette:
   description: Dark ANSI theme — 9 colors defined in pallet.json

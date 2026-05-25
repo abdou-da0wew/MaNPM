@@ -298,3 +298,94 @@ manpm profile list
 manpm profile use strict
 manpm profile create custom
 ```
+
+---
+
+### pkgjson
+
+Manage package.json dependencies — lock versions, fix mismatches, check for updates.
+
+```
+manpm pkgjson <subcommand> [options]
+```
+
+Alias: `pj`
+
+#### lock
+
+Lock dependency versions by removing `^` and `~` range prefixes.
+
+```
+manpm pkgjson lock [--major] [<packages...>]
+```
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--major` | bool | false | Only lock minor/patch (keep caret prefix) |
+
+If no packages are specified, all dependencies are locked. Specify package names to lock only those.
+
+Examples:
+
+```
+manpm pkgjson lock
+manpm pkgjson lock --major
+manpm pkgjson lock express react
+```
+
+#### fix
+
+Detect and fix version mismatches across dependency groups (dependencies, devDependencies, peerDependencies).
+
+```
+manpm pkgjson fix [--dry-run] [--strategy=highest]
+```
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--dry-run` | bool | false | Only show mismatches without fixing |
+| `--strategy` | string | `highest` | Resolution strategy |
+
+Examples:
+
+```
+manpm pkgjson fix
+manpm pkgjson fix --dry-run
+```
+
+#### update
+
+Check for outdated packages by querying the npm registry.
+
+```
+manpm pkgjson update [--dry-run] [<packages...>]
+```
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--dry-run` | bool | false | Only show what would be updated |
+
+If no packages are specified, all dependencies are checked.
+
+Examples:
+
+```
+manpm pkgjson update
+manpm pkgjson update --dry-run
+manpm pkgjson update express
+```
+
+| Subcommand | Description |
+|------------|-------------|
+| `list` | List available profiles |
+| `use <name>` | Switch to a named profile |
+| `create <name>` | Create a new profile |
+| `delete <name>` | Delete an existing profile |
+
+Examples:
+
+```
+manpm profile list
+manpm profile use strict
+manpm profile create custom
+```
